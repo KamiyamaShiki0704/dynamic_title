@@ -1,0 +1,16 @@
+/target/
+
+*.dll
+*.exe
+*.pdb
+*.lib
+*.exp
+*.ilk
+*.log
+
+dynamic-title-bg.ini
+
+.vs/
+.vscode/
+.idea/
+*.user

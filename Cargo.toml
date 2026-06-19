@@ -1,0 +1,28 @@
+[package]
+name = "dynamic-title-bg"
+version = "0.14.0"
+edition = "2024"
+repository = "https://github.com/KamiyamaShiki0704/dynamic_title"
+license = "MIT OR Apache-2.0"
+publish = false
+
+[dependencies]
+ilhook = { version = "2.3.0", features = ["x64"] }
+
+[dependencies.windows]
+version = "0.61"
+features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_System_Threading",
+    "Win32_System_LibraryLoader",
+    "Win32_System_Memory",
+    "Win32_System_SystemServices",
+    "Win32_Graphics_Direct3D",
+    "Win32_Graphics_Direct3D12",
+    "Win32_Graphics_Dxgi",
+    "Win32_Graphics_Dxgi_Common",
+]
+
+[lib]
+crate-type = ["cdylib"]
