@@ -2344,3 +2344,45 @@ The repository is locally initialized and staged correctly for an initial GitHub
 ### Next Step
 
 Set local git identity, commit the staged files, then add a GitHub remote and push `main`.
+
+## 2026-06-19 20:33 CST - GitHub Initial Upload Completed
+
+### Completed
+
+- Re-read project-local `TASK_STATUS.md`, `PLANS.md`, and `AGENTS.md`.
+- Confirmed SSH private key exists at `C:\Users\33333\.ssh\id_ed25519_github`.
+- Added the project repository URL to `Cargo.toml`:
+  - `https://github.com/KamiyamaShiki0704/dynamic_title`
+- Set local-only git identity:
+  - `user.name=KamiyamaShiki0704`
+  - `user.email=KamiyamaShiki0704@users.noreply.github.com`
+- Created initial commit:
+  - `98fb104 Initial dynamic title background bridge`
+- Added SSH remote:
+  - `git@github.com:KamiyamaShiki0704/dynamic_title.git`
+- Verified SSH/GitHub access with the provided key.
+- Pushed `main` to GitHub successfully.
+- Confirmed local branch tracks `origin/main`.
+
+### Modified Files
+
+- `F:\GoldenAge\fromsoftware-rs\_Project\dynamic-title-bg\Cargo.toml`
+- `F:\GoldenAge\fromsoftware-rs\_Project\dynamic-title-bg\TASK_STATUS.md`
+- `F:\GoldenAge\fromsoftware-rs\_Project\dynamic-title-bg\.git\...`
+
+### Current Judgment
+
+The project is now uploaded to GitHub:
+
+`https://github.com/KamiyamaShiki0704/dynamic_title`
+
+The pushed commit includes `_Asset`, source, docs, example ini, licenses, and archived experiment modules. Ignored local outputs/config remain excluded.
+
+### Unresolved
+
+- This status update itself is local-only because it was written after the initial push.
+- GitHub CLI `gh` is still unavailable, but it is no longer needed for this upload because SSH push worked.
+
+### Next Step
+
+Optionally commit and push this final status update later, or leave `TASK_STATUS.md` as local working-state notes.
