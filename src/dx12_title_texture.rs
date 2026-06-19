@@ -99,6 +99,7 @@ struct AtlasSettings {
     debug_fill_rgba: Option<[u8; 4]>,
     bink_plane_hijack: bool,
     bink_plane_target_title_index: usize,
+    bink_plane_auto_source: bool,
     bink_plane_source_index: usize,
     bink_plane_source_width: u32,
     bink_plane_source_height: u32,
@@ -135,6 +136,13 @@ struct BinkPlaneSource {
 
 unsafe impl Send for BinkPlaneSource {}
 
+fn is_near_16x9(width: u64, height: u32) -> bool {
+    width > 0
+        && height > 0
+        && ((width as i128 * 9) - (height as i128 * 16)).abs()
+            <= (width.max(height as u64) as i128 / 32).max(1)
+}
+
 impl Drop for DynamicTexture {
     fn drop(&mut self) {
         if !self.fence_event.is_invalid() {
@@ -155,6 +163,7 @@ pub(crate) fn install(
     debug_fill_rgba: Option<[u8; 4]>,
     bink_plane_hijack: bool,
     bink_plane_target_title_index: usize,
+    bink_plane_auto_source: bool,
     bink_plane_source_index: usize,
     bink_plane_source_width: u32,
     bink_plane_source_height: u32,
@@ -180,6 +189,7 @@ pub(crate) fn install(
         debug_fill_rgba,
         bink_plane_hijack,
         bink_plane_target_title_index,
+        bink_plane_auto_source,
         bink_plane_source_index,
         bink_plane_source_width,
         bink_plane_source_height,
@@ -434,10 +444,7 @@ fn maybe_log_bink_plane_inventory(
         return;
     }
 
-    let near_16x9 = width > 0
-        && height > 0
-        && ((width as i128 * 9) - (height as i128 * 16)).abs()
-            <= (width.max(height as u64) as i128 / 32).max(1);
+    let near_16x9 = is_near_16x9(width, height);
     let large_enough = width >= (source_width / 4).max(1)
         && height >= (source_height / 4).max(1)
         && width <= source_width
@@ -476,8 +483,14 @@ fn maybe_hijack_title_with_bink_plane(
     let Some(settings) = ATLAS_SETTINGS.get() else {
         return;
     };
-    if !settings.bink_plane_hijack
-        || resource_desc.Width != settings.bink_plane_source_width as u64
+    if !settings.bink_plane_hijack {
+        return;
+    }
+    if settings.bink_plane_auto_source {
+        maybe_auto_store_bink_plane_source(device, original, resource, desc, resource_desc);
+        return;
+    }
+    if resource_desc.Width != settings.bink_plane_source_width as u64
         || resource_desc.Height != settings.bink_plane_source_height
         || resource_desc.Format.0 != settings.bink_plane_source_format
     {
@@ -499,33 +512,95 @@ fn maybe_hijack_title_with_bink_plane(
         return;
     }
 
-    let Some(resource_ref) = (unsafe { ID3D12Resource::from_raw_borrowed(&resource) }) else {
-        append_log("dx12 title texture probe: failed to borrow bink plane resource");
+    if !store_bink_plane_source(device, resource, desc, resource_desc) {
         return;
-    };
-    let srv_desc = if desc.is_null() {
-        None
-    } else {
-        Some(unsafe { *desc })
-    };
-    {
-        let mut stored = STORED_BINK_PLANE
-            .lock()
-            .expect("stored bink plane mutex poisoned");
-        *stored = Some(BinkPlaneSource {
-            device_ptr: device as usize,
-            resource: resource_ref.clone(),
-            srv_desc,
-            width: resource_desc.Width,
-            height: resource_desc.Height,
-            format: resource_desc.Format.0,
-        });
     }
     append_log(&format!(
         "dx12 title texture probe: stored bink plane source #{plane_index} resource={resource:p} descriptor_ready={}",
         target_descriptor != 0
     ));
     maybe_apply_bink_plane_to_title(device, original);
+}
+
+fn maybe_auto_store_bink_plane_source(
+    device: *mut c_void,
+    original: CreateShaderResourceViewFn,
+    resource: *mut c_void,
+    desc: *const D3D12_SHADER_RESOURCE_VIEW_DESC,
+    resource_desc: &D3D12_RESOURCE_DESC,
+) {
+    let Some(settings) = ATLAS_SETTINGS.get() else {
+        return;
+    };
+    let target_descriptor = STORED_TITLE_DESCRIPTOR.load(Ordering::Acquire);
+    if target_descriptor == 0 {
+        return;
+    }
+
+    let source_format = if settings.bink_plane_source_format > 0 {
+        settings.bink_plane_source_format
+    } else {
+        28
+    };
+    if resource_desc.Format.0 != source_format
+        || resource_desc.MipLevels != 1
+        || resource_desc.Width < 640
+        || resource_desc.Height < 360
+        || !is_near_16x9(resource_desc.Width, resource_desc.Height)
+    {
+        return;
+    }
+
+    if STORED_BINK_PLANE
+        .lock()
+        .expect("stored bink plane mutex poisoned")
+        .is_some()
+    {
+        return;
+    }
+
+    let auto_index = BINK_PLANE_MATCH_COUNT.fetch_add(1, Ordering::Relaxed) + 1;
+    append_log(&format!(
+        "dx12 title texture probe: auto bink source candidate #{auto_index} resource={resource:p} desc={:?} {}x{} target_descriptor=0x{target_descriptor:X}",
+        resource_desc.Format, resource_desc.Width, resource_desc.Height
+    ));
+    if !store_bink_plane_source(device, resource, desc, resource_desc) {
+        return;
+    }
+    append_log(&format!(
+        "dx12 title texture probe: auto stored bink source #{auto_index} resource={resource:p} {}x{} fmt={}",
+        resource_desc.Width, resource_desc.Height, resource_desc.Format.0
+    ));
+    maybe_apply_bink_plane_to_title(device, original);
+}
+
+fn store_bink_plane_source(
+    device: *mut c_void,
+    resource: *mut c_void,
+    desc: *const D3D12_SHADER_RESOURCE_VIEW_DESC,
+    resource_desc: &D3D12_RESOURCE_DESC,
+) -> bool {
+    let Some(resource_ref) = (unsafe { ID3D12Resource::from_raw_borrowed(&resource) }) else {
+        append_log("dx12 title texture probe: failed to borrow bink plane resource");
+        return false;
+    };
+    let srv_desc = if desc.is_null() {
+        None
+    } else {
+        Some(unsafe { *desc })
+    };
+    let mut stored = STORED_BINK_PLANE
+        .lock()
+        .expect("stored bink plane mutex poisoned");
+    *stored = Some(BinkPlaneSource {
+        device_ptr: device as usize,
+        resource: resource_ref.clone(),
+        srv_desc,
+        width: resource_desc.Width,
+        height: resource_desc.Height,
+        format: resource_desc.Format.0,
+    });
+    true
 }
 
 fn maybe_apply_bink_plane_to_title(device: *mut c_void, original: CreateShaderResourceViewFn) {

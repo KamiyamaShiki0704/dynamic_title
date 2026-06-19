@@ -2415,3 +2415,254 @@ The GitHub repository now has an explicit top-level `LICENSE`, plus `LICENSE-APA
 ### Next Step
 
 Commit and push this status update.
+
+## 2026-06-19 23:05 CST - Replaced BK2 Playback Failure Diagnosis
+
+### Completed
+
+- Re-read the project-local task records and AGENTS protocol before diagnosing the new ER log.
+- Checked `F:\GoldenAge\dll\dynamic_title\dynamic-title-bg.ini`.
+- Checked `F:\GoldenAge\dll\dynamic_title\dynamic-title-bg.log`.
+- Confirmed the active ini still requests `movie:/00001010.bk2` and still expects the bridge source to be `1920x1080`, `DXGI_FORMAT(28)`, source index `1`.
+- Confirmed the game-root `F:\SteamLibrary\steamapps\common\ELDEN RING\Game\movie\00001010.bk2` exists and was recently replaced; current size is about 53 MB.
+- Confirmed ER reached the visible title target:
+  - `stored title descriptor title_index=#1`
+  - `title target callback fired`
+  - `bink bridge waiting for source plane`
+- Confirmed MovieImp setup succeeded for the new file:
+  - `setup returned 0x01`
+  - nonzero `bink_texture[+B8]`
+  - decoded path `movie:/00001010.bk2`
+- Confirmed no successful source-store or bridge-apply log appeared.
+- Observed candidate textures around `1280x720` and `DXGI_FORMAT(97/98)`, while the previous known-good source `DXGI_FORMAT(28) 1920x1080` did not appear as a bridgeable source.
+
+### Modified Files
+
+- `F:\GoldenAge\fromsoftware-rs\_Project\dynamic-title-bg\TASK_STATUS.md`
+
+### Current Judgment
+
+The new BK2 is probably opening successfully, but it no longer produces the exact source texture that the current bridge configuration waits for. The failure is most likely not the MovieImp path itself; it is the source-plane match:
+
+- expected by ini: `DXGI_FORMAT(28) 1920x1080 source_index=1`
+- observed in log after replacement: likely candidates around `1280x720` with `DXGI_FORMAT(97/98)`, plus no bridge-applied line
+
+If the user changed the BK2 filename instead of replacing the contents of `00001010.bk2`, then `movie_imp_path` also needs to be changed, because the current DLL still requests `movie:/00001010.bk2`.
+
+### Unresolved
+
+- Need one focused probe run with `bink_plane_probe_all=true` to inventory the new BK2's actual Bink/source texture dimensions, formats, and indexes.
+- Need to confirm whether the correct source is `1280x720 DXGI_FORMAT(98)`, another `1280x720` candidate, or a different format hidden by the current filters.
+
+### Next Step
+
+For the next ER run, enable:
+
+```ini
+log_enabled=true
+bink_plane_probe_all=true
+```
+
+Then either adjust `bink_plane_source_width`, `bink_plane_source_height`, `bink_plane_source_format`, and `bink_plane_source_index` based on the inventory, or test likely candidates from the new log such as `1280x720` with `DXGI_FORMAT(98)`.
+
+## 2026-06-19 23:06 CST - 4K Replacement BK2 Diagnosis
+
+### Completed
+
+- User confirmed the test replaced `Game\movie\00001010.bk2` directly, so path/file lookup is not the blocker.
+- Ran `ffprobe` on the current replacement file.
+- Confirmed current `00001010.bk2` properties:
+  - Bink tag `BIKi`
+  - video `3840x2160`
+  - `30 fps`
+  - duration about `5.73s`
+  - decoded pixel format reported by ffprobe as `yuv420p`
+  - multiple mono Bink audio streams
+- Re-read current code in `src\dx12_title_texture.rs` and confirmed `bink_plane_probe_all` is filtered relative to the configured source width/height.
+- Re-read the appended ER log and confirmed the user's `1280x720 DXGI_FORMAT(98)` test did match and apply:
+  - `bink plane candidate #1 ... DXGI_FORMAT(98) 1280x720`
+  - `bink bridge applied source 1280x720 fmt=98`
+- Because that visual test did not work, the matched `1280x720/98` resource is probably not the replacement BK2's live color output.
+- Updated the deployment ini at `F:\GoldenAge\dll\dynamic_title\dynamic-title-bg.ini` for a no-bridge 4K inventory run:
+  - keep `bink_plane_hijack=true` so title-target callback still starts MovieImp;
+  - set `bink_plane_source_width=3840`;
+  - set `bink_plane_source_height=2160`;
+  - set `bink_plane_source_format=-999` to prevent accidental source bridging;
+  - set `probe_title_srv=true`;
+  - set `bink_plane_probe_all=true`.
+- Backed up and cleared the current ER log:
+  - `F:\GoldenAge\dll\dynamic_title\dynamic-title-bg.log.before_4k_inventory_20260619_230537`
+
+### Modified Files
+
+- `F:\GoldenAge\dll\dynamic_title\dynamic-title-bg.ini`
+- `F:\GoldenAge\fromsoftware-rs\_Project\dynamic-title-bg\TASK_STATUS.md`
+
+### Current Judgment
+
+The replacement file is a 4K Bink video. The previous working bridge was tuned for a `1920x1080 DXGI_FORMAT(28)` live RGB texture, so replacing it with a 4K `BIKi` file changes the expected source characteristics. The failed `1280x720/98` test is meaningful: the hook did bridge that resource, but it was the wrong resource for the video.
+
+The next clean log should answer whether ER/Bink creates any 4K, 2K, or otherwise movie-related source texture after MovieImp setup. If no plausible live video texture appears, the replacement BK2 may need to be re-encoded to match the old working 1920x1080/Bink output profile, or the DLL will need a stronger source correlation method instead of size/format matching.
+
+### Unresolved
+
+- Need a fresh ER run with the diagnostic ini.
+- Need to identify the actual live source resource for the 4K replacement BK2, if one exists.
+- Need to decide whether to support arbitrary BK2 resolutions in code or require users to encode BK2 files to the known-good 1920x1080 profile.
+
+### Next Step
+
+Run ER once with the current diagnostic ini. Expected result is no intentional video bridge, but the log should contain `bink inventory` lines after `movie imp trigger: setup returned 0x01`. Inspect those lines to choose the real source candidate.
+
+## 2026-06-19 23:09 CST - 4K Inventory Result and Format 28 Index 2 Test Config
+
+### Completed
+
+- Read the fresh clean ER log from the 4K inventory run.
+- Confirmed the configured path is still `movie:/00001010.bk2`.
+- Confirmed title target is found and callback fires.
+- Confirmed MovieImp setup returns `0x01`.
+- Noted immediate `trigger-after` `bink_texture[+B8]=0x0`; this may indicate open/decode has not completed at that exact log point or that this replacement behaves differently than the previous known-good BK2.
+- Inventory found relevant resources:
+  - early `DXGI_FORMAT(28) 3840x2160` before title target;
+  - post-setup `DXGI_FORMAT(61) 3840x2160` / `1920x1080` luma-like planes;
+  - post-setup `DXGI_FORMAT(28) 3840x2160`;
+  - later another `DXGI_FORMAT(28) 3840x2160`.
+- Updated `F:\GoldenAge\dll\dynamic_title\dynamic-title-bg.ini` for the next visual test:
+  - `bink_plane_source_width=3840`
+  - `bink_plane_source_height=2160`
+  - `bink_plane_source_format=28`
+  - `bink_plane_source_index=2`
+  - `bink_plane_probe_all=false`
+  - `probe_title_srv=true`
+- Backed up and cleared the log:
+  - `F:\GoldenAge\dll\dynamic_title\dynamic-title-bg.log.before_4k_fmt28_index2_20260619_230935`
+
+### Modified Files
+
+- `F:\GoldenAge\dll\dynamic_title\dynamic-title-bg.ini`
+- `F:\GoldenAge\fromsoftware-rs\_Project\dynamic-title-bg\TASK_STATUS.md`
+
+### Current Judgment
+
+For a 4K replacement BK2, source index `1` for `3840x2160 DXGI_FORMAT(28)` is likely wrong because the first match is an early non-title/non-movie resource. The most likely direct RGB candidate from this run is the second `3840x2160 DXGI_FORMAT(28)` resource, which appears after MovieImp setup. The next test should determine whether that resource is the live color video output.
+
+### Unresolved
+
+- Need visual confirmation for `3840x2160 DXGI_FORMAT(28) source_index=2`.
+- If source index `2` fails, test index `3` or add stronger correlation using BinkTexture/MovieIns ownership instead of size/format/order.
+
+### Next Step
+
+Run ER once with the new index-2 config. Expected log should show:
+
+```text
+bink plane candidate #1 ... DXGI_FORMAT(28) 3840x2160
+bink plane candidate #2 ... DXGI_FORMAT(28) 3840x2160
+stored bink plane source #2
+bink bridge applied source 3840x2160 fmt=28
+```
+
+If the visual is correct, keep this as the 4K config. If not, inspect the new log and try source index `3`.
+
+## 2026-06-19 23:18 CST - Automatic Bink Source Selection Implemented
+
+### Completed
+
+- User confirmed the 4K `3840x2160 DXGI_FORMAT(28) source_index=2` test displayed the BK2.
+- Wrote the automatic source-selection plan to `PLANS.md` before editing.
+- Added config key `bink_plane_auto_source`, defaulting to `true`.
+- Preserved manual override keys for debug/fallback when `bink_plane_auto_source=false`.
+- Updated `src\dx12_title_texture.rs`:
+  - auto mode only considers source candidates after the visible title target descriptor is stored;
+  - auto mode prefers `DXGI_FORMAT(28)` candidates by default;
+  - auto mode requires 16:9-ish dimensions, at least `640x360`, one mip level;
+  - auto mode stores the first valid candidate and only replaces it if a later candidate has a larger area;
+  - manual mode keeps the previous width/height/format/index behavior.
+- Updated `dynamic-title-bg.example.ini` to document auto mode.
+- Updated test deployment ini at `F:\GoldenAge\dll\dynamic_title\dynamic-title-bg.ini`:
+  - `bink_plane_auto_source=true`;
+  - manual values left as fallback/debug only;
+  - `probe_title_srv=false`;
+  - `bink_plane_probe_all=false`;
+  - `log_enabled=true` for upcoming multi-resolution tests.
+- Ran `cargo fmt`.
+- Built with `cargo build --release --offline`; build passed.
+- Deployed the new DLL to `F:\GoldenAge\dll\dynamic_title\dynamic_title_bg.dll`.
+- Backed up previous DLL and cleared the log for fresh testing.
+
+### Modified Files
+
+- `F:\GoldenAge\fromsoftware-rs\_Project\dynamic-title-bg\PLANS.md`
+- `F:\GoldenAge\fromsoftware-rs\_Project\dynamic-title-bg\TASK_STATUS.md`
+- `F:\GoldenAge\fromsoftware-rs\_Project\dynamic-title-bg\src\lib.rs`
+- `F:\GoldenAge\fromsoftware-rs\_Project\dynamic-title-bg\src\dx12_title_texture.rs`
+- `F:\GoldenAge\fromsoftware-rs\_Project\dynamic-title-bg\dynamic-title-bg.example.ini`
+- `F:\GoldenAge\dll\dynamic_title\dynamic-title-bg.ini`
+- `F:\GoldenAge\dll\dynamic_title\dynamic_title_bg.dll`
+
+### Current Judgment
+
+The bridge no longer needs per-resolution width/height/index for normal testing. It should automatically handle the known working cases:
+
+- `1920x1080` BK2 through post-title `DXGI_FORMAT(28)`;
+- `3840x2160` BK2 through post-title `DXGI_FORMAT(28)`;
+- other 16:9 resolutions if Bink exposes a post-title `DXGI_FORMAT(28)` resource.
+
+The logic intentionally ignores early resources before the `MENU_DummyMovie` target is observed, which is what made 4K manual `source_index=1` incorrect.
+
+### Unresolved
+
+- Need user tests with several BK2 resolutions.
+- Unknown whether all replacement BK2 encodes produce a direct `DXGI_FORMAT(28)` output. If some only expose planes, they may still need manual mode or future YUV composition.
+- `log_enabled=true` is intentionally enabled for the test round; turn it back off for normal use after validation.
+
+### Next Step
+
+Test multiple BK2 files by replacing `Game\movie\00001010.bk2`, one resolution at a time. For each run, record whether the title background shows the BK2 and keep/send the fresh `F:\GoldenAge\dll\dynamic_title\dynamic-title-bg.log`. Useful test set:
+
+- `1280x720`
+- `1920x1080`
+- `2560x1440`
+- `3840x2160`
+
+## 2026-06-19 23:30 CST - Auto Source Replacement Bug Fixed
+
+### Completed
+
+- Read the fresh log for the `1920x1080`, `8 fps`, `68s`, `BIKi` replacement BK2.
+- Confirmed MovieImp setup succeeded:
+  - `setup returned 0x01`
+  - nonzero `bink_texture[+B8]`
+  - decoded path `movie:/00001010.bk2`
+- Confirmed the first auto-selected source was likely correct:
+  - `auto stored bink source #1 ... 1920x1080 fmt=28`
+- Confirmed auto mode later replaced it with an unrelated/larger candidate:
+  - `auto stored bink source #2 ... 3840x2160 fmt=28`
+  - visual result was black background.
+- Updated `PLANS.md` with the follow-up adjustment.
+- Changed auto mode in `src\dx12_title_texture.rs` to freeze the first valid post-title source and ignore later candidates.
+- Ran `cargo fmt`.
+- Built with `cargo build --release --offline`; build passed.
+- Deployed the rebuilt DLL to `F:\GoldenAge\dll\dynamic_title\dynamic_title_bg.dll`.
+- Backed up the previous DLL and cleared `F:\GoldenAge\dll\dynamic_title\dynamic-title-bg.log`.
+
+### Modified Files
+
+- `F:\GoldenAge\fromsoftware-rs\_Project\dynamic-title-bg\PLANS.md`
+- `F:\GoldenAge\fromsoftware-rs\_Project\dynamic-title-bg\TASK_STATUS.md`
+- `F:\GoldenAge\fromsoftware-rs\_Project\dynamic-title-bg\src\dx12_title_texture.rs`
+- `F:\GoldenAge\dll\dynamic_title\dynamic_title_bg.dll`
+
+### Current Judgment
+
+The black-background failure was caused by the auto selector replacing the likely correct `1920x1080` source with a later unrelated `3840x2160` resource. Freezing the first valid post-title `DXGI_FORMAT(28)` source should fix this BK2 while preserving the successful 4K case, because the successful 4K run's first valid post-title source was already the 4K movie output.
+
+### Unresolved
+
+- Need user retest with the same `1920x1080 8fps` BK2.
+- If this still fails, the next step is to add a short grace period or correlate candidates more directly with MovieIns/BinkTexture instead of relying on first valid source.
+
+### Next Step
+
+Run ER once with the same current `00001010.bk2`. Expected log should show a single `auto stored bink source ... 1920x1080 fmt=28` and no later replacement.

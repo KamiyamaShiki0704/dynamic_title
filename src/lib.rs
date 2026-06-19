@@ -121,6 +121,7 @@ pub unsafe extern "C" fn DllMain(hmodule: HINSTANCE, reason: u32, _: *mut c_void
                 config.atlas_debug_fill,
                 config.bink_plane_hijack,
                 config.bink_plane_target_title_index,
+                config.bink_plane_auto_source,
                 config.bink_plane_source_index,
                 config.bink_plane_source_width,
                 config.bink_plane_source_height,
@@ -169,6 +170,7 @@ struct Config {
     probe_title_srv: bool,
     bink_plane_hijack: bool,
     bink_plane_target_title_index: usize,
+    bink_plane_auto_source: bool,
     bink_plane_source_index: usize,
     bink_plane_source_width: u32,
     bink_plane_source_height: u32,
@@ -216,6 +218,7 @@ impl Config {
             probe_title_srv: false,
             bink_plane_hijack: false,
             bink_plane_target_title_index: 1,
+            bink_plane_auto_source: true,
             bink_plane_source_index: 1,
             bink_plane_source_width: 1920,
             bink_plane_source_height: 1080,
@@ -366,6 +369,9 @@ impl Config {
                         if let Ok(index) = value.parse::<usize>() {
                             config.bink_plane_target_title_index = index.max(1);
                         }
+                    }
+                    "bink_plane_auto_source" | "bink_plane_auto" | "auto_bink_plane_source" => {
+                        config.bink_plane_auto_source = parse_bool(value, true);
                     }
                     "bink_plane_source_index" | "bink_plane_index" => {
                         if let Ok(index) = value.parse::<usize>() {

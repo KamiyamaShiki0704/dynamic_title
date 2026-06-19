@@ -479,3 +479,36 @@ The project should be published as its own repository from `_Project\dynamic-tit
 4. Update README with a short note that game assets/BK2/GFX files are not included.
 5. Initialize a local git repository, stage the intended files only, and create an initial commit.
 6. If GitHub CLI or an origin URL is available, push to GitHub; otherwise stop with clear next steps for installing `gh` or providing a remote URL.
+
+## Active Plan: Automatic Bink RGB Source Selection
+
+The manual tests proved different BK2 resolutions can work, but fixed `bink_plane_source_width/height/index` makes users retune the ini for each file. Add an auto mode so multiple resolutions can be tested with the same config.
+
+1. Add a default-on config key for bridge mode, tentatively `bink_plane_auto_source=true`.
+2. Keep the existing manual keys as fallback/debug controls:
+   - `bink_plane_source_width`
+   - `bink_plane_source_height`
+   - `bink_plane_source_format`
+   - `bink_plane_source_index`
+3. In auto mode, only consider source candidates after the visible title target descriptor has been stored. This skips early non-title/non-movie resources that caused 4K `source_index=1` to be wrong.
+4. In auto mode, prefer `DXGI_FORMAT(28)` Texture2D resources with:
+   - 16:9-ish dimensions;
+   - practical video size, at least 640x360;
+   - one mip level;
+   - not the tiny 64x36 title target.
+5. Store/replace the current Bink source when a better candidate appears:
+   - prefer larger area;
+   - if same area, allow later resources to replace earlier ones.
+6. Apply the latest selected source to the stored title descriptor each time it changes.
+7. Add concise logs that distinguish manual and auto source selection.
+8. Update example/deploy ini to use auto mode and remove per-resolution source width/height/index from normal config.
+9. Build with `cargo build --release --offline`, deploy the DLL to `F:\GoldenAge\dll\dynamic_title`, and clear the log for user tests.
+
+### Follow-up Adjustment: Freeze First Auto Source
+
+The first multi-resolution test with a `1920x1080` BK2 showed auto mode selected the likely correct `1920x1080 DXGI_FORMAT(28)` source, then replaced it with a later unrelated `3840x2160 DXGI_FORMAT(28)` resource, producing a black background.
+
+1. Change auto mode to store only the first valid post-title `DXGI_FORMAT(28)` 16:9 source.
+2. Do not replace an existing auto source with a larger later resource.
+3. Keep manual mode unchanged for targeted debugging.
+4. Build, deploy, clear the log, and retest the same `1920x1080 8fps` BK2.
