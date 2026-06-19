@@ -18,8 +18,6 @@ The verified BK2 RGB source is:
 - `DXGI_FORMAT(28)`
 - Bink source index `1`
 
-This avoids the unstable global D3D12 draw hook and does not use the old ImGui/MediaFoundation overlay path.
-
 ## Build
 
 ```powershell
@@ -46,7 +44,7 @@ Put `dynamic-title-bg.ini` next to the injected DLL or next to `eldenring.exe`.
 Use `dynamic-title-bg.example.ini` as the current low-noise baseline. The BK2 must be available in ER's game-root movie namespace, for example:
 
 ```text
-F:\SteamLibrary\steamapps\common\ELDEN RING\Game\movie\00001010.bk2
+ELDEN RING\Game\movie\00001010.bk2
 ```
 
 ## Assets
@@ -62,3 +60,12 @@ Active build files:
 - `src\dx12_title_texture.rs`
 
 Archived experiment files are in `legacy_unused_rs`.
+
+## License
+
+This project is licensed under either of:
+
+- Apache License, Version 2.0
+- MIT License
+
+at your option. See `LICENSE-APACHE`, `LICENSE-MIT`, and `LICENSE`.
