@@ -2386,3 +2386,32 @@ The pushed commit includes `_Asset`, source, docs, example ini, licenses, and ar
 ### Next Step
 
 Optionally commit and push this final status update later, or leave `TASK_STATUS.md` as local working-state notes.
+
+## 2026-06-19 20:48 CST - README and License Re-uploaded
+
+### Completed
+
+- Re-read project-local `TASK_STATUS.md`, `PLANS.md`, and `AGENTS.md`.
+- Preserved the existing local README edits that made the BK2 path generic/public-friendly.
+- Added top-level `LICENSE` explaining the dual-license choice.
+- Added a `License` section to `README.md`.
+- Committed and pushed to GitHub:
+  - `914905b Update README license information`
+
+### Modified Files
+
+- `F:\GoldenAge\fromsoftware-rs\_Project\dynamic-title-bg\LICENSE`
+- `F:\GoldenAge\fromsoftware-rs\_Project\dynamic-title-bg\README.md`
+- `F:\GoldenAge\fromsoftware-rs\_Project\dynamic-title-bg\TASK_STATUS.md`
+
+### Current Judgment
+
+The GitHub repository now has an explicit top-level `LICENSE`, plus `LICENSE-APACHE`, `LICENSE-MIT`, and README license text.
+
+### Unresolved
+
+- This status entry was written after pushing the README/license commit and still needs its own commit if the remote should contain the latest task status.
+
+### Next Step
+
+Commit and push this status update.
