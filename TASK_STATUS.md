@@ -2666,3 +2666,37 @@ The black-background failure was caused by the auto selector replacing the likel
 ### Next Step
 
 Run ER once with the same current `00001010.bk2`. Expected log should show a single `auto stored bink source ... 1920x1080 fmt=28` and no later replacement.
+
+## 2026-06-19 23:36 CST - Auto Source Update Pushed to GitHub
+
+### Completed
+
+- Reviewed the working tree before publishing.
+- Confirmed the staged scope was limited to:
+  - `PLANS.md`
+  - `TASK_STATUS.md`
+  - `dynamic-title-bg.example.ini`
+  - `src\dx12_title_texture.rs`
+  - `src\lib.rs`
+- Confirmed `cargo build --release --offline` had already passed after the auto-source freeze fix.
+- Committed the update:
+  - `632c53e Add automatic Bink source selection`
+- Pushed `main` to GitHub:
+  - `git@github.com:KamiyamaShiki0704/dynamic_title.git`
+
+### Modified Files
+
+- `F:\GoldenAge\fromsoftware-rs\_Project\dynamic-title-bg\TASK_STATUS.md`
+
+### Current Judgment
+
+The GitHub repository now contains the automatic source-selection implementation and documentation/config updates. This status entry is a local follow-up record and should be pushed if remote task notes must stay fully current.
+
+### Unresolved
+
+- Need no further code changes for this push.
+- Need user multi-resolution validation results for future tuning.
+
+### Next Step
+
+Optionally commit and push this status-only entry.
