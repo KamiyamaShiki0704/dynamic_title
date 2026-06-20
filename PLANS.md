@@ -512,3 +512,185 @@ The first multi-resolution test with a `1920x1080` BK2 showed auto mode selected
 2. Do not replace an existing auto source with a larger later resource.
 3. Keep manual mode unchanged for targeted debugging.
 4. Build, deploy, clear the log, and retest the same `1920x1080 8fps` BK2.
+
+## Active Plan: BK2 to MP4 Convenience Tool
+
+Build a small helper tool for quickly previewing/exporting BK2 files as MP4.
+
+1. Add a `_Tools\bk2-to-mp4` folder.
+2. Implement a PowerShell script with a simple CLI:
+   - accept one or more `.bk2` files;
+   - default output path is beside each source file with `.mp4` extension;
+   - optional `-OutputDir` writes all outputs to a chosen folder;
+   - optional `-Crf` and `-Preset` tune H.264 quality/speed.
+3. Add a `.bat` launcher so the tool can be used by dragging `.bk2` files onto it.
+4. Auto-detect:
+   - `G:\ffmpeg\ffmpeg-8.0-essentials_build\bin\ffmpeg.exe`
+   - `ffmpeg.exe` from `PATH` as fallback.
+5. Add a README with practical usage.
+6. Update `TASK_STATUS.md` after implementation.
+
+## Active Plan: Prevent MovieImp From Throttling Game FPS
+
+User found a serious regression: after the DLL starts BK2 playback, the normally
+60 fps game becomes 30 fps and remains that way after entering gameplay. The
+likely cause is ER's native `CSMovieImp/CSMovieIns` render/update state being
+driven from the main thread at the BK2 timing cadence.
+
+1. Keep the existing working `MENU_DummyMovie` SRV bridge intact.
+2. Do not re-enable global D3D12 draw hooks.
+3. Track the ER `CSMovieIns` pointer when `movie_imp_trigger` starts the title
+   BK2, even when logging/probes are disabled.
+4. Reuse the existing narrow `main.exe+0xE215C0` MovieIns render hook, but add a
+   functional throttle mode separate from verbose render probing.
+5. In throttle mode, only call the original MovieIns render/update for the
+   tracked title movie after a configurable minimum interval. Skip intermediate
+   calls so the game/main menu can continue at 60 fps while the BK2 updates at
+   its own cadence.
+6. Add config keys:
+   - `movie_imp_render_throttle`, default `true`;
+   - `movie_imp_render_interval_ms`, default `33`.
+7. Keep logging disabled by default; emit throttle diagnostics only if
+   `log_enabled=true`.
+8. Build, deploy to `F:\GoldenAge\dll\dynamic_title`, and update
+   `TASK_STATUS.md`.
+
+### Follow-up Adjustment: Stop On Gameplay Signals, Not Title Task Arm
+
+The first stop-monitor test showed `title_flow=false` and `title_step=false`
+for the whole current bridge path, so the old SYSTEX title gate never armed and
+never closed the movie.
+
+1. Keep full-rate main-menu playback; do not add render throttling.
+2. Treat successful `movie_imp_trigger` as the arm point.
+3. Add a short configurable grace period after MovieImp setup so initial
+   title-loading state cannot close the movie immediately.
+4. After the grace period, close the MovieIns when any gameplay/transition signal
+   appears:
+   - loading screen active;
+   - HUD state is default;
+   - in-game flow task group active.
+5. Keep common/menu flow out of the stop condition for now, so title-side option
+   menus do not unnecessarily kill the background video.
+6. Build, deploy, and retest with `log_enabled=true` until a
+   `movie imp stop monitor: closed` line appears during game entry.
+
+### Follow-up Adjustment: Test MovieImp Sync Option
+
+The next log showed the monitor closed after the 2s grace while the title was
+still loading, which froze the video but restored 60 fps. The setup log also
+showed ER fields `present[+F4]=1 option[+F8]=1`; this option may be the native
+movie pacing/sync behavior that caps the main loop to the BK2 cadence.
+
+1. Keep title video alive until a stable title state has been observed:
+   `loading=false`, `hud_default=false`, and `ingame_flow=false`.
+2. Only after that stable title state, stop on later `loading`, `hud_default`,
+   or `ingame_flow`.
+3. Add configurable ER MovieIns setup flags:
+   - `movie_imp_setup_flag`, default `1`;
+   - `movie_imp_present`, default `1`;
+   - `movie_imp_unknown`, default `0`;
+   - `movie_imp_option`, default `0` for the next test.
+4. Deploy with `movie_imp_option=0` and logging enabled.
+5. Interpret:
+   - moving video + 60 fps: keep option 0;
+   - moving video + 30 fps: MovieIns render itself is pacing the frame loop;
+   - frozen/blank video: option 1 is required and the next path is a narrower
+     BinkTexture update hook or direct update call without MovieIns draw/submit.
+
+### Follow-up Adjustment: Accept Native Title 30fps, Stop Before Gameplay
+
+User confirmed both Elden Ring and Nightreign lock to 30 fps while playing BK2
+through the native movie path. Stop treating title-menu 30 fps as a bug for the
+current release.
+
+1. Restore `movie_imp_option=1`, matching the moving native movie path.
+2. Keep the stable-title arming logic:
+   - wait for `loading=false`, `hud_default=false`, `ingame_flow=false`;
+   - only then close on later loading/gameplay/HUD signals.
+3. Validate the release behavior:
+   - title/main menu video moves, even if the menu is 30 fps;
+   - starting/loading into gameplay logs `movie imp stop monitor: closed`;
+   - gameplay frame rate returns to normal after the movie path is closed.
+
+### Follow-up Adjustment: Use WorldChrMan Player Signal
+
+The latest ER test showed the stop monitor armed after the title became stable,
+but no later `loading`, `hud_default`, or `ingame_flow` transition was observed,
+so MovieIns never closed and gameplay stayed at 30 fps.
+
+1. Keep the native moving movie path (`movie_imp_option=1`).
+2. Extend the stop snapshot with a direct in-world signal:
+   `WorldChrMan::instance().main_player.is_some()`.
+3. Keep this signal only as a stop condition after the stable title state has
+   been observed, so the movie is not closed during initial title loading.
+4. Build and deploy, then validate that entering gameplay produces
+   `world_player=true` followed by `movie imp stop monitor: closed`.
+
+### Follow-up Adjustment: Let World Player Bypass Title Arming
+
+The next ER log showed `world_player=true`, but it happened before the monitor
+had armed on stable title state. The monitor therefore missed the gameplay
+transition and MovieIns stayed alive.
+
+1. Keep stable-title arming for ambiguous signals such as `loading` and
+   `hud_default`.
+2. Treat `world_player=true` as a strong leave-title signal after the initial
+   grace period, even if stable title state has not yet been observed.
+3. Close MovieIns immediately on this strong signal.
+4. Keep logging the close reason distinctly so the next validation can tell
+   whether the bypass path fired.
+
+## Active Plan: Re-arm Title BK2 After Returning From Gameplay
+
+The stop-on-gameplay fix now restores gameplay FPS by closing the native MovieIns. The remaining uncommon case is returning from gameplay to the title menu: the previous one-shot trigger/callback state leaves the title background static.
+
+1. Keep the current gameplay stop behavior: close MovieIns when `world_player=true` or other leave-title signals appear.
+2. After a successful close, reset the MovieImp trigger and stop-monitor guards so the title movie can be started again later in the same process.
+3. Let the title descriptor callback be re-fired when the title target is observed again after the trigger guard has been reset.
+4. Avoid starting MovieImp while gameplay/world state is active; rely on the same post-title-target delay and stop monitor for each replay cycle.
+5. Keep logging default behavior unchanged and add only concise debug lines when logging is enabled.
+6. Build, deploy to `F:\GoldenAge\dll\dynamic_title`, clear the log, and update `TASK_STATUS.md`.
+
+## Active Plan: Retry MovieImp Re-arm and Preserve Title Descriptor
+
+The latest return-to-title test showed the re-arm monitor fired, but too early: `CSMovieImp` global was still null, so the second setup failed. It also suggests the `MENU_DummyMovie` descriptor is not recreated on return, so clearing the stored title descriptor prevents a later Bink source from being bridged.
+
+1. Keep the `fs-title-skip-master` finding as reference only: it hooks a generic engine-flag getter and is not a direct title-ready detector for this bridge.
+2. Change MovieImp trigger execution so setup returns success/failure instead of silently returning.
+3. If MovieImp global or MovieIns is not ready after returning to title, retry for a bounded period instead of consuming the one-shot trigger state permanently.
+4. Preserve the stored title descriptor across gameplay close; clear only the Bink source and callback-fired state so the next movie RGB source can be bridged into the existing descriptor.
+5. Keep the world-player guard so retries never start movie playback while gameplay is active.
+6. Build, deploy to `F:\GoldenAge\dll\dynamic_title`, clear the log, and update `TASK_STATUS.md`.
+
+## Active Plan: Restore Static Dummy When Return Re-arm Cannot Play
+
+The latest test showed return-to-title remains unable to create MovieImp: `CSMovieImp` global stays null. Preserving the old title descriptor caused a worse failure because auto-source captured a non-movie `DXGI_FORMAT(28)` resource and bridged it into the title slot, producing black.
+
+1. Keep retrying MovieImp on return, but do not allow Bink RGB source capture until MovieImp setup succeeds.
+2. When storing the title descriptor, also store the original `MENU_DummyMovie` resource/SRV desc/device so the static dummy can be restored later.
+3. On MovieIns close, disable Bink source capture, clear the old source, and restore the original dummy descriptor if available.
+4. Only after successful MovieImp setup re-enable Bink source capture, so post-return random `DXGI_FORMAT(28)` resources cannot black out the title.
+5. Build, deploy, clear log, and update `TASK_STATUS.md`.
+
+## Active Plan: Engine Flag Driven Return Re-arm
+
+Use the `fs-title-skip-master` engine-flag getter as a read-only signal for title-flow activity. Do not change the flag return value.
+
+1. Add a configurable `movie_imp_rearm_on_engine_flag` switch, enabled in the deployed ER config for this test.
+2. Find the engine flag getter in `eldenring.exe` using the same AOB shape as `fs-title-skip-master`:
+   `48 0F BE 01 48 8D 0D ?? ?? ?? ?? 48 FF 24 C1`.
+3. Hook the getter with `ilhook`; call the original normally and never force false.
+4. When the queried flag byte is `1..6`, log it sparingly and request MovieImp re-arm through the existing retry path if no trigger is already running and `world_player` is false.
+5. Keep Bink source capture gated behind successful MovieImp setup so a false/early flag cannot black out the title.
+6. Build, deploy, clear log, and update `TASK_STATUS.md`.
+
+## Active Plan: Freeze Last Video Frame On Return
+
+The desired stable behavior is not original dummy fallback. It should keep the last bridged BK2/video frame as a static image after MovieIns is stopped for gameplay FPS restoration.
+
+1. Keep the current gameplay stop behavior and keep engine-flag re-arm disabled in deployment.
+2. On MovieIns close, disable further Bink source capture so random post-return `DXGI_FORMAT(28)` resources cannot overwrite the title descriptor.
+3. Do not clear the stored Bink RGB source and do not restore the original `MENU_DummyMovie` dummy descriptor.
+4. Leave the title descriptor bound to the last successful Bink RGB source so the title shows a static video frame after returning from gameplay.
+5. Build, deploy to `F:\GoldenAge\dll\dynamic_title`, clear log, and update `TASK_STATUS.md`.

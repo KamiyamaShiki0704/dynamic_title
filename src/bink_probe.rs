@@ -6,6 +6,11 @@ use std::sync::OnceLock;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
+use eldenring::cs::{
+    CSFeManHudState, CSFeManImp, CSMenuManImp, CSNowLoadingHelper, CSTaskGroupIndex, CSTaskImp,
+    WorldChrMan,
+};
+use fromsoftware_shared::FromStatic;
 use ilhook::x64::{CallbackOption, HookFlags, Registers, hook_closure_retn};
 use windows::Win32::Foundation::HMODULE;
 use windows::Win32::System::LibraryLoader::{GetModuleFileNameW, GetModuleHandleA, GetProcAddress};
@@ -29,6 +34,7 @@ static MOVIE_WRAPPER_CALL_COUNT: AtomicUsize = AtomicUsize::new(0);
 static MOVIE_INS_HOOK_INSTALLED: AtomicUsize = AtomicUsize::new(0);
 static MOVIE_INS_CALL_COUNT: AtomicUsize = AtomicUsize::new(0);
 static MOVIE_IMP_TRIGGER_STARTED: AtomicUsize = AtomicUsize::new(0);
+static MOVIE_IMP_RETURN_REARM_STARTED: AtomicUsize = AtomicUsize::new(0);
 static MOVIE_STEP_HOOK_INSTALLED: AtomicUsize = AtomicUsize::new(0);
 static MOVIE_STEP_CALL_COUNT: AtomicUsize = AtomicUsize::new(0);
 static MOVIE_STATE0_CALL_COUNT: AtomicUsize = AtomicUsize::new(0);
@@ -39,8 +45,13 @@ static MOVIE_TICK_HOOK_INSTALLED: AtomicUsize = AtomicUsize::new(0);
 static MOVIE_TICK_CALL_COUNT: AtomicUsize = AtomicUsize::new(0);
 static MOVIE_RENDER_HOOK_INSTALLED: AtomicUsize = AtomicUsize::new(0);
 static MOVIE_RENDER_CALL_COUNT: AtomicUsize = AtomicUsize::new(0);
+static MOVIE_RENDER_PROBE_ENABLED: AtomicUsize = AtomicUsize::new(0);
 static MOVIE_DRAW_SUBMIT_HOOK_INSTALLED: AtomicUsize = AtomicUsize::new(0);
 static MOVIE_DRAW_SUBMIT_CALL_COUNT: AtomicUsize = AtomicUsize::new(0);
+static MOVIE_STOP_MONITOR_ENABLED: AtomicUsize = AtomicUsize::new(1);
+static MOVIE_STOP_MONITOR_STARTED: AtomicUsize = AtomicUsize::new(0);
+static MOVIE_STOP_MONITOR_INTERVAL_MS: AtomicUsize = AtomicUsize::new(100);
+static MOVIE_STOP_MONITOR_GRACE_MS: AtomicUsize = AtomicUsize::new(2000);
 static STAFFROLL_STATUS_SLOT_HOOK_INSTALLED: AtomicUsize = AtomicUsize::new(0);
 static STAFFROLL_SLOT_HOOK_INSTALLED: AtomicUsize = AtomicUsize::new(0);
 static STAFFROLL_SETUP_HOOK_INSTALLED: AtomicUsize = AtomicUsize::new(0);
@@ -66,6 +77,7 @@ static LAST_MOVIE_PARENT: AtomicUsize = AtomicUsize::new(0);
 static LAST_MOVIE_RENDER_RESULT: AtomicUsize = AtomicUsize::new(0);
 static LAST_MOVIE_DRAW_ARG: AtomicUsize = AtomicUsize::new(0);
 static LAST_MOVIE_INNER: AtomicUsize = AtomicUsize::new(0);
+static MOVIE_IMP_TRIGGER_SETTINGS: OnceLock<MovieImpTriggerSettings> = OnceLock::new();
 
 const ER_MOVIE_OPEN_WRAPPER_RVA: usize = 0x1E83EE0;
 const NR_BINK_TEXTURE_OPEN_RVA: usize = 0x21152A0;
@@ -117,9 +129,21 @@ pub(crate) struct BinkReplaceRule {
     pub(crate) to_path: PathBuf,
 }
 
+#[derive(Clone)]
+struct MovieImpTriggerSettings {
+    log_path: Option<PathBuf>,
+    path: String,
+    delay: Duration,
+    volume: f32,
+    setup_flag: u8,
+    present: u8,
+    unknown: u8,
+    option: u32,
+}
+
 pub(crate) fn install_async(log_path: Option<PathBuf>, replace_rule: Option<BinkReplaceRule>) {
-    if let Some(path) = log_path {
-        let _ = LOG_PATH.set(path);
+    if let Some(path) = log_path.as_ref() {
+        let _ = LOG_PATH.set(path.clone());
     }
     if let Some(rule) = replace_rule {
         append_log(&format!(
@@ -215,8 +239,8 @@ pub(crate) fn install_bink_texture_open_probe(
     force_present_option: bool,
     copy_present_option_after_open: bool,
 ) {
-    if let Some(path) = log_path {
-        let _ = LOG_PATH.set(path);
+    if let Some(path) = log_path.as_ref() {
+        let _ = LOG_PATH.set(path.clone());
     }
     let _ = BINK_TEXTURE_FORCE_PRESENT_FLAG.set(force_present_flag);
     let _ = BINK_TEXTURE_FORCE_PRESENT_OPTION.set(force_present_option);
@@ -326,8 +350,22 @@ pub(crate) fn trigger_er_movie_imp_once_after_delay(
     path: String,
     delay: Duration,
     volume: f32,
+    setup_flag: u8,
+    present: u8,
+    unknown: u8,
+    option: u32,
 ) {
-    trigger_er_movie_imp_once(log_path, path, delay, volume, "DLL attach delay");
+    trigger_er_movie_imp_once(
+        log_path,
+        path,
+        delay,
+        volume,
+        setup_flag,
+        present,
+        unknown,
+        option,
+        "DLL attach delay",
+    );
 }
 
 pub(crate) fn trigger_er_movie_imp_once(
@@ -335,35 +373,114 @@ pub(crate) fn trigger_er_movie_imp_once(
     path: String,
     delay: Duration,
     volume: f32,
+    setup_flag: u8,
+    present: u8,
+    unknown: u8,
+    option: u32,
     reason: &'static str,
 ) {
-    if let Some(path) = log_path {
-        let _ = LOG_PATH.set(path);
+    if let Some(path) = log_path.as_ref() {
+        let _ = LOG_PATH.set(path.clone());
     }
+    let settings = MovieImpTriggerSettings {
+        log_path,
+        path,
+        delay,
+        volume,
+        setup_flag,
+        present,
+        unknown,
+        option,
+    };
+    let _ = MOVIE_IMP_TRIGGER_SETTINGS.set(settings.clone());
     if MOVIE_IMP_TRIGGER_STARTED.swap(1, Ordering::AcqRel) != 0 {
         return;
     }
 
     std::thread::spawn(move || {
         append_log(&format!(
-            "movie imp trigger: waiting {delay:?} after {reason} before ER CSMovieIns setup path=\"{path}\" volume={volume:.3}"
+            "movie imp trigger: waiting {:?} after {reason} before ER CSMovieIns setup path=\"{}\" volume={:.3} setup_flag={} present={} unknown={} option={}",
+            settings.delay,
+            settings.path,
+            settings.volume,
+            settings.setup_flag,
+            settings.present,
+            settings.unknown,
+            settings.option
         ));
-        std::thread::sleep(delay);
-        run_er_movie_imp_trigger(path, volume);
+        std::thread::sleep(settings.delay);
+        for attempt in 1..=120 {
+            if world_player_active() {
+                append_log("movie imp trigger: skipped setup because world player is active");
+                MOVIE_IMP_TRIGGER_STARTED.store(0, Ordering::Release);
+                return;
+            }
+            if run_er_movie_imp_trigger(
+                settings.path.clone(),
+                settings.volume,
+                settings.setup_flag,
+                settings.present,
+                settings.unknown,
+                settings.option,
+            ) {
+                return;
+            }
+            if attempt == 1 || attempt % 10 == 0 {
+                append_log(&format!(
+                    "movie imp trigger: setup retry pending attempt={attempt}/120"
+                ));
+            }
+            std::thread::sleep(Duration::from_millis(500));
+        }
+        append_log("movie imp trigger: setup retries exhausted");
+        MOVIE_IMP_TRIGGER_STARTED.store(0, Ordering::Release);
     });
 }
 
-fn run_er_movie_imp_trigger(path: String, volume: f32) {
+pub(crate) fn configure_movie_imp_stop_monitor(
+    log_path: Option<PathBuf>,
+    enabled: bool,
+    check_interval: Duration,
+    grace: Duration,
+) {
+    if let Some(path) = log_path {
+        let _ = LOG_PATH.set(path);
+    }
+    MOVIE_STOP_MONITOR_ENABLED.store(enabled as usize, Ordering::Release);
+    MOVIE_STOP_MONITOR_INTERVAL_MS.store(
+        check_interval.as_millis().clamp(10, usize::MAX as u128) as usize,
+        Ordering::Release,
+    );
+    MOVIE_STOP_MONITOR_GRACE_MS.store(
+        grace.as_millis().min(usize::MAX as u128) as usize,
+        Ordering::Release,
+    );
+    append_log(&format!(
+        "movie imp stop monitor: configured enabled={} interval_ms={} grace_ms={}",
+        enabled,
+        MOVIE_STOP_MONITOR_INTERVAL_MS.load(Ordering::Acquire),
+        MOVIE_STOP_MONITOR_GRACE_MS.load(Ordering::Acquire)
+    ));
+}
+
+fn run_er_movie_imp_trigger(
+    path: String,
+    volume: f32,
+    setup_flag: u8,
+    present: u8,
+    unknown: u8,
+    option: u32,
+) -> bool {
     let Ok(exe) = (unsafe { GetModuleHandleA(None) }) else {
         append_log("movie imp trigger: main module unavailable");
-        return;
+        return false;
     };
     let module_name = main_module_name(exe);
     if !module_name.contains("eldenring.exe") {
         append_log(&format!(
             "movie imp trigger: skipped for non-ER module \"{module_name}\""
         ));
-        return;
+        return false;
     }
 
     let base = exe.0 as usize;
@@ -372,7 +489,7 @@ fn run_er_movie_imp_trigger(path: String, volume: f32) {
         append_log(&format!(
             "movie imp trigger: global[main.exe+0x{ER_CS_MOVIE_IMP_GLOBAL_RVA:X}] unreadable"
         ));
-        return;
+        return false;
     }
 
     let imp = unsafe { read_usize(global_addr) };
@@ -380,7 +497,7 @@ fn run_er_movie_imp_trigger(path: String, volume: f32) {
         append_log(&format!(
             "movie imp trigger: global[main.exe+0x{ER_CS_MOVIE_IMP_GLOBAL_RVA:X}]=0x{imp:X} has no readable CSMovieIns"
         ));
-        return;
+        return false;
     }
 
     let movie_ins = unsafe { read_usize(imp + CS_MOVIE_IMP_MOVIE_INS_OFFSET) };
@@ -388,10 +505,11 @@ fn run_er_movie_imp_trigger(path: String, volume: f32) {
         append_log(&format!(
             "movie imp trigger: CSMovieImp=0x{imp:X} [+38]=<null>"
         ));
-        return;
+        return false;
     }
 
     let _ = MOVIE_INS_LAYOUT.set(ER_MOVIE_INS_LAYOUT);
+    LAST_MOVIE_PARENT.store(movie_ins, Ordering::Release);
     append_log(&format!(
         "movie imp trigger: CSMovieImp=0x{imp:X} CSMovieIns[+38]=0x{movie_ins:X} setup=main.exe+0x{ER_MOVIE_INS_SETUP_RVA:X}"
     ));
@@ -406,17 +524,18 @@ fn run_er_movie_imp_trigger(path: String, volume: f32) {
     let result = unsafe {
         setup(
             movie_ins as *mut c_void,
-            1,
+            setup_flag,
             wide_path.as_ptr(),
             volume.clamp(0.0, 1.0),
-            1,
-            0,
-            1,
+            present,
+            unknown,
+            option,
         )
     };
 
     append_log(&format!("movie imp trigger: setup returned 0x{result:02X}"));
     if result != 0 {
+        crate::dx12_title_texture::enable_bink_bridge_source_capture("movie imp setup succeeded");
         unsafe {
             std::ptr::write_unaligned((imp + 0x40) as *mut usize, movie_ins);
         }
@@ -442,6 +561,10 @@ fn run_er_movie_imp_trigger(path: String, volume: f32) {
         }
     }
     log_movie_ins(0, movie_ins, "trigger-after");
+    if result != 0 && MOVIE_STOP_MONITOR_ENABLED.load(Ordering::Acquire) != 0 {
+        start_movie_imp_stop_monitor(movie_ins);
+    }
+    result != 0
 }
 
 pub(crate) fn install_movie_step_probe(log_path: Option<PathBuf>) {
@@ -590,6 +713,7 @@ pub(crate) fn install_movie_render_probe(log_path: Option<PathBuf>) {
     if let Some(path) = log_path {
         let _ = LOG_PATH.set(path);
     }
+    MOVIE_RENDER_PROBE_ENABLED.store(1, Ordering::Release);
     install_rva_hook_once(
         ER_MOVIE_RENDER_STATE_RVA,
         "movie render probe",
@@ -1241,6 +1365,7 @@ fn movie_render_hook(registers: *mut Registers, original: usize) -> usize {
     let target = LAST_MOVIE_PARENT.load(Ordering::Acquire);
     let matches_target =
         target != 0 && (rcx == target || rdx == target || r8 == target || r9 == target);
+    let probe_enabled = MOVIE_RENDER_PROBE_ENABLED.load(Ordering::Acquire) != 0;
     let draw_arg = if rcx != 0 && is_readable_memory(rcx + 0xA8, 8) {
         unsafe { read_usize(rcx + 0xA8) }
     } else {
@@ -1252,7 +1377,7 @@ fn movie_render_hook(registers: *mut Registers, original: usize) -> usize {
         0
     };
 
-    if matches_target {
+    if probe_enabled && matches_target {
         append_log(&format!(
             "movie render probe: call #{count} caller=0x{caller:X} caller_rva={} rcx=0x{rcx:X} rdx=0x{rdx:X} r8=0x{r8:X} r9=0x{r9:X}",
             caller_rva(caller)
@@ -1268,7 +1393,7 @@ fn movie_render_hook(registers: *mut Registers, original: usize) -> usize {
         LAST_MOVIE_INNER.store(inner, Ordering::Release);
     }
 
-    if matches_target {
+    if probe_enabled && matches_target {
         append_log(&format!(
             "movie render probe: return #{count} result=0x{result:X} tracked_parent=0x{target:X} tracked_draw_arg=0x{draw_arg:X} tracked_inner=0x{inner:X}"
         ));
@@ -1329,6 +1454,267 @@ fn tracked_arg_match(
         || (render_result != 0 && arg == render_result)
         || (draw_arg != 0 && arg == draw_arg)
         || (inner != 0 && arg == inner)
+}
+
+fn start_movie_imp_stop_monitor(movie_ins: usize) {
+    if MOVIE_STOP_MONITOR_STARTED.swap(1, Ordering::AcqRel) != 0 {
+        return;
+    }
+    std::thread::spawn(move || {
+        let interval =
+            Duration::from_millis(MOVIE_STOP_MONITOR_INTERVAL_MS.load(Ordering::Acquire) as u64);
+        let grace =
+            Duration::from_millis(MOVIE_STOP_MONITOR_GRACE_MS.load(Ordering::Acquire) as u64);
+        let mut last_snapshot = TitleGateSnapshot::capture();
+        append_log(&format!(
+            "movie imp stop monitor: started movie_ins=0x{movie_ins:X} grace={grace:?} {}",
+            last_snapshot.summary()
+        ));
+        std::thread::sleep(grace);
+        let grace_snapshot = TitleGateSnapshot::capture();
+        append_log(&format!(
+            "movie imp stop monitor: watching after grace {}",
+            grace_snapshot.summary()
+        ));
+        let mut armed = grace_snapshot.title_ready();
+        if armed {
+            append_log("movie imp stop monitor: armed from grace snapshot");
+        }
+
+        for _ in 0..18000 {
+            std::thread::sleep(interval);
+            let snapshot = TitleGateSnapshot::capture();
+            if snapshot != last_snapshot {
+                append_log(&format!(
+                    "movie imp stop monitor: gate changed {}",
+                    snapshot.summary()
+                ));
+                last_snapshot = snapshot;
+            }
+
+            if snapshot.world_player {
+                close_movie_ins(movie_ins, "world player active");
+                return;
+            }
+
+            if !armed {
+                if snapshot.title_ready() {
+                    armed = true;
+                    append_log(&format!(
+                        "movie imp stop monitor: armed from stable title {}",
+                        snapshot.summary()
+                    ));
+                }
+                continue;
+            }
+
+            if snapshot.should_stop_after_title() {
+                close_movie_ins(movie_ins, "left title menu gate");
+                return;
+            }
+        }
+
+        append_log("movie imp stop monitor: timed out without gate close");
+    });
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct TitleGateSnapshot {
+    title_flow: bool,
+    title_step: bool,
+    ingame_flow: bool,
+    common_flow: bool,
+    loading: bool,
+    hud_default: bool,
+    world_player: bool,
+}
+
+impl TitleGateSnapshot {
+    fn capture() -> Self {
+        Self {
+            title_flow: task_group_active(CSTaskGroupIndex::GameFlowInGame_TitleMenu),
+            title_step: task_group_active(CSTaskGroupIndex::TaskLineIdx_InGame_TitleMenuStep),
+            ingame_flow: task_group_active(CSTaskGroupIndex::GameFlowInGame_InGameMenu),
+            common_flow: task_group_active(CSTaskGroupIndex::GameFlowInGame_CommonMenu),
+            loading: loading_screen_active().unwrap_or(false),
+            hud_default: hud_is_default(),
+            world_player: world_player_active(),
+        }
+    }
+
+    fn title_ready(&self) -> bool {
+        !self.ingame_flow && !self.loading && !self.hud_default && !self.world_player
+    }
+
+    fn should_stop_after_title(&self) -> bool {
+        self.ingame_flow || self.loading || self.hud_default || self.world_player
+    }
+
+    fn summary(&self) -> String {
+        format!(
+            "title_flow={} title_step={} ingame_flow={} common_flow={} loading={} hud_default={} world_player={}",
+            self.title_flow,
+            self.title_step,
+            self.ingame_flow,
+            self.common_flow,
+            self.loading,
+            self.hud_default,
+            self.world_player
+        )
+    }
+}
+
+fn loading_screen_active() -> Option<bool> {
+    let menu_loading = unsafe { CSMenuManImp::instance() }.ok().map(|menu_man| {
+        let timer = menu_man.loading_screen_data.timer;
+        timer.is_finite() && timer > 0.25
+    });
+    let now_loading = unsafe { CSNowLoadingHelper::instance() }
+        .ok()
+        .map(|helper| helper.is_loading_screen_active());
+
+    match (menu_loading, now_loading) {
+        (Some(a), Some(b)) => Some(a || b),
+        (Some(a), None) => Some(a),
+        (None, Some(b)) => Some(b),
+        (None, None) => None,
+    }
+}
+
+fn hud_is_default() -> bool {
+    unsafe { CSFeManImp::instance() }
+        .map(|fe_man| fe_man.hud_state == CSFeManHudState::Default)
+        .unwrap_or(false)
+}
+
+fn world_player_active() -> bool {
+    unsafe { WorldChrMan::instance() }
+        .map(|world_chr_man| world_chr_man.main_player.is_some())
+        .unwrap_or(false)
+}
+
+fn task_group_active(index: CSTaskGroupIndex) -> bool {
+    let Ok(task) = (unsafe { CSTaskImp::instance() }) else {
+        return false;
+    };
+    let wanted = index as u32;
+    task.inner
+        .task_base
+        .task_groups
+        .iter()
+        .find(|entry| entry.index == wanted)
+        .map(|entry| entry.active)
+        .unwrap_or(false)
+}
+
+fn close_movie_ins(movie_ins: usize, reason: &str) {
+    if movie_ins == 0 || !is_readable_memory(movie_ins, 0x140) {
+        append_log(&format!(
+            "movie imp stop monitor: cannot close unreadable movie_ins=0x{movie_ins:X} reason={reason}"
+        ));
+        return;
+    }
+
+    let inner = unsafe { read_usize(movie_ins + ER_MOVIE_INS_LAYOUT.bink_texture_offset) };
+    let active_before = unsafe { read_u8(movie_ins + 0x130) };
+    let state_before = unsafe { read_u32(movie_ins + 0x40) };
+    append_log(&format!(
+        "movie imp stop monitor: closing movie_ins=0x{movie_ins:X} inner[+B8]=0x{inner:X} reason={reason} active=0x{active_before:02X} state=0x{state_before:X}"
+    ));
+
+    if inner != 0 && is_readable_memory(inner, 0x58) {
+        let vtable = unsafe { read_usize(inner) };
+        if vtable != 0 && is_readable_memory(vtable + 0x10, 8) {
+            let close_fn = unsafe { read_usize(vtable + 0x10) };
+            type CloseFn = unsafe extern "system" fn(usize) -> usize;
+            let close: CloseFn = unsafe { std::mem::transmute(close_fn) };
+            let result = unsafe { close(inner) };
+            append_log(&format!(
+                "movie imp stop monitor: inner close returned 0x{result:X} close=0x{close_fn:X}"
+            ));
+        }
+    }
+
+    unsafe {
+        std::ptr::write_volatile(
+            (movie_ins + ER_MOVIE_INS_LAYOUT.bink_texture_offset) as *mut usize,
+            0,
+        );
+        std::ptr::write_volatile((movie_ins + 0x130) as *mut u8, 0);
+        std::ptr::write_volatile((movie_ins + 0x40) as *mut u32, 0);
+        std::ptr::write_volatile((movie_ins + 0x44) as *mut u32, 0);
+    }
+
+    if let Ok(exe) = unsafe { GetModuleHandleA(None) } {
+        let base = exe.0 as usize;
+        let global_addr = base + ER_CS_MOVIE_IMP_GLOBAL_RVA;
+        if is_readable_memory(global_addr, 8) {
+            let imp = unsafe { read_usize(global_addr) };
+            if imp != 0 && is_readable_memory(imp + 0x48, 8) {
+                let field_40 = unsafe { read_usize(imp + 0x40) };
+                if field_40 == movie_ins {
+                    unsafe {
+                        std::ptr::write_volatile((imp + 0x40) as *mut usize, 0);
+                    }
+                }
+            }
+        }
+    }
+
+    LAST_MOVIE_PARENT.store(0, Ordering::Release);
+    reset_movie_imp_cycle_after_close(reason);
+    let active_after = unsafe { read_u8(movie_ins + 0x130) };
+    let state_after = unsafe { read_u32(movie_ins + 0x40) };
+    append_log(&format!(
+        "movie imp stop monitor: closed movie_ins=0x{movie_ins:X} active {active_before:02X}->{active_after:02X} state 0x{state_before:X}->0x{state_after:X}"
+    ));
+}
+
+fn reset_movie_imp_cycle_after_close(reason: &str) {
+    MOVIE_IMP_TRIGGER_STARTED.store(0, Ordering::Release);
+    MOVIE_STOP_MONITOR_STARTED.store(0, Ordering::Release);
+    crate::dx12_title_texture::reset_bink_bridge_cycle(reason);
+    start_movie_imp_return_rearm_monitor();
+}
+
+fn start_movie_imp_return_rearm_monitor() {
+    if MOVIE_IMP_RETURN_REARM_STARTED.swap(1, Ordering::AcqRel) != 0 {
+        return;
+    }
+    let Some(settings) = MOVIE_IMP_TRIGGER_SETTINGS.get().cloned() else {
+        MOVIE_IMP_RETURN_REARM_STARTED.store(0, Ordering::Release);
+        return;
+    };
+    std::thread::spawn(move || {
+        let interval =
+            Duration::from_millis(MOVIE_STOP_MONITOR_INTERVAL_MS.load(Ordering::Acquire) as u64);
+        append_log("movie imp return rearm: waiting for title-ready state");
+        for _ in 0..18000 {
+            std::thread::sleep(interval);
+            let snapshot = TitleGateSnapshot::capture();
+            if snapshot.title_ready() {
+                append_log(&format!(
+                    "movie imp return rearm: title-ready detected {}",
+                    snapshot.summary()
+                ));
+                MOVIE_IMP_RETURN_REARM_STARTED.store(0, Ordering::Release);
+                trigger_er_movie_imp_once(
+                    settings.log_path,
+                    settings.path,
+                    settings.delay,
+                    settings.volume,
+                    settings.setup_flag,
+                    settings.present,
+                    settings.unknown,
+                    settings.option,
+                    "returned to title",
+                );
+                return;
+            }
+        }
+        MOVIE_IMP_RETURN_REARM_STARTED.store(0, Ordering::Release);
+        append_log("movie imp return rearm: timed out waiting for title-ready state");
+    });
 }
 
 type MovieOpenWrapperFn = unsafe extern "system" fn(usize, usize, usize, usize) -> usize;

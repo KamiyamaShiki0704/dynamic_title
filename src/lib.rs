@@ -78,11 +78,21 @@ pub unsafe extern "C" fn DllMain(hmodule: HINSTANCE, reason: u32, _: *mut c_void
             bink_probe::install_staffroll_ctor_probe(config.log_path.clone());
         }
         if config.movie_imp_trigger && !config.movie_imp_trigger_on_title_target {
+            bink_probe::configure_movie_imp_stop_monitor(
+                config.log_path.clone(),
+                config.movie_imp_stop_on_gameplay,
+                config.movie_imp_gate_check_interval,
+                config.movie_imp_stop_grace,
+            );
             bink_probe::trigger_er_movie_imp_once_after_delay(
                 config.log_path.clone(),
                 config.movie_imp_path.clone(),
                 config.movie_imp_delay,
                 config.movie_imp_volume,
+                config.movie_imp_setup_flag,
+                config.movie_imp_present,
+                config.movie_imp_unknown,
+                config.movie_imp_option,
             );
         }
 
@@ -97,12 +107,29 @@ pub unsafe extern "C" fn DllMain(hmodule: HINSTANCE, reason: u32, _: *mut c_void
                     let movie_path = config.movie_imp_path.clone();
                     let delay = config.movie_imp_delay;
                     let volume = config.movie_imp_volume;
+                    let stop_on_gameplay = config.movie_imp_stop_on_gameplay;
+                    let gate_check_interval = config.movie_imp_gate_check_interval;
+                    let stop_grace = config.movie_imp_stop_grace;
+                    let setup_flag = config.movie_imp_setup_flag;
+                    let present = config.movie_imp_present;
+                    let unknown = config.movie_imp_unknown;
+                    let option = config.movie_imp_option;
                     Some(Box::new(move || {
+                        bink_probe::configure_movie_imp_stop_monitor(
+                            log_path.clone(),
+                            stop_on_gameplay,
+                            gate_check_interval,
+                            stop_grace,
+                        );
                         bink_probe::trigger_er_movie_imp_once(
                             log_path.clone(),
                             movie_path.clone(),
                             delay,
                             volume,
+                            setup_flag,
+                            present,
+                            unknown,
+                            option,
                             "title target descriptor",
                         );
                     }))
@@ -165,6 +192,13 @@ struct Config {
     movie_imp_path: String,
     movie_imp_delay: Duration,
     movie_imp_volume: f32,
+    movie_imp_setup_flag: u8,
+    movie_imp_present: u8,
+    movie_imp_unknown: u8,
+    movie_imp_option: u32,
+    movie_imp_stop_on_gameplay: bool,
+    movie_imp_gate_check_interval: Duration,
+    movie_imp_stop_grace: Duration,
     bink_replace_from: String,
     bink_replace_to: Option<PathBuf>,
     probe_title_srv: bool,
@@ -213,6 +247,13 @@ impl Config {
             movie_imp_path: "movie:/00001010.bk2".to_string(),
             movie_imp_delay: Duration::from_secs(8),
             movie_imp_volume: 0.7,
+            movie_imp_setup_flag: 1,
+            movie_imp_present: 1,
+            movie_imp_unknown: 0,
+            movie_imp_option: 1,
+            movie_imp_stop_on_gameplay: true,
+            movie_imp_gate_check_interval: Duration::from_millis(100),
+            movie_imp_stop_grace: Duration::from_millis(2000),
             bink_replace_from: "10010010.bk2".to_string(),
             bink_replace_to: None,
             probe_title_srv: false,
@@ -351,6 +392,42 @@ impl Config {
                             if volume.is_finite() {
                                 config.movie_imp_volume = volume.clamp(0.0, 1.0);
                             }
+                        }
+                    }
+                    "movie_imp_setup_flag" => {
+                        if let Ok(flag) = value.parse::<u8>() {
+                            config.movie_imp_setup_flag = flag;
+                        }
+                    }
+                    "movie_imp_present" | "movie_imp_present_flag" => {
+                        if let Ok(present) = value.parse::<u8>() {
+                            config.movie_imp_present = present;
+                        }
+                    }
+                    "movie_imp_unknown" | "movie_imp_setup_unknown" => {
+                        if let Ok(unknown) = value.parse::<u8>() {
+                            config.movie_imp_unknown = unknown;
+                        }
+                    }
+                    "movie_imp_option" | "movie_imp_mode" => {
+                        if let Ok(option) = value.parse::<u32>() {
+                            config.movie_imp_option = option;
+                        }
+                    }
+                    "movie_imp_stop_on_gameplay"
+                    | "movie_imp_stop_after_title"
+                    | "movie_imp_stop_on_gate_close" => {
+                        config.movie_imp_stop_on_gameplay = parse_bool(value, true);
+                    }
+                    "movie_imp_gate_check_ms" | "movie_imp_stop_check_ms" => {
+                        if let Ok(ms) = value.parse::<u64>() {
+                            config.movie_imp_gate_check_interval =
+                                Duration::from_millis(ms.max(10));
+                        }
+                    }
+                    "movie_imp_stop_grace_ms" | "movie_imp_gameplay_stop_grace_ms" => {
+                        if let Ok(ms) = value.parse::<u64>() {
+                            config.movie_imp_stop_grace = Duration::from_millis(ms);
                         }
                     }
                     "bink_replace_from" => {

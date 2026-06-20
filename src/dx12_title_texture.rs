@@ -55,6 +55,7 @@ static HIJACK_COUNT: AtomicUsize = AtomicUsize::new(0);
 static BINK_PLANE_MATCH_COUNT: AtomicUsize = AtomicUsize::new(0);
 static BINK_PLANE_PROBE_COUNT: AtomicUsize = AtomicUsize::new(0);
 static STORED_TITLE_DESCRIPTOR: AtomicUsize = AtomicUsize::new(0);
+static BINK_SOURCE_CAPTURE_ENABLED: AtomicUsize = AtomicUsize::new(0);
 static STORED_BINK_PLANE: Mutex<Option<BinkPlaneSource>> = Mutex::new(None);
 static DYNAMIC_TEXTURE: Mutex<Option<DynamicTexture>> = Mutex::new(None);
 static ATLAS_SETTINGS: OnceLock<AtlasSettings> = OnceLock::new();
@@ -233,6 +234,32 @@ pub(crate) fn install(
             ));
         }
     }
+}
+
+pub(crate) fn reset_bink_bridge_cycle(reason: &str) {
+    BINK_SOURCE_CAPTURE_ENABLED.store(0, Ordering::Release);
+    BINK_PLANE_MATCH_COUNT.store(0, Ordering::Release);
+    TITLE_TARGET_CALLBACK_FIRED.store(0, Ordering::Release);
+    let has_video_source = STORED_BINK_PLANE
+        .lock()
+        .map(|source| source.is_some())
+        .unwrap_or(false);
+    append_log(&format!(
+        "dx12 title texture probe: reset bink bridge cycle reason={reason} froze_video_source={} preserved_title_descriptor=0x{:X}",
+        has_video_source,
+        STORED_TITLE_DESCRIPTOR.load(Ordering::Acquire)
+    ));
+}
+
+pub(crate) fn enable_bink_bridge_source_capture(reason: &str) {
+    BINK_SOURCE_CAPTURE_ENABLED.store(1, Ordering::Release);
+    if let Ok(mut source) = STORED_BINK_PLANE.lock() {
+        *source = None;
+    }
+    BINK_PLANE_MATCH_COUNT.store(0, Ordering::Release);
+    append_log(&format!(
+        "dx12 title texture probe: enabled bink source capture reason={reason}"
+    ));
 }
 
 fn create_shader_resource_view_addr() -> Result<usize> {
@@ -484,6 +511,9 @@ fn maybe_hijack_title_with_bink_plane(
         return;
     };
     if !settings.bink_plane_hijack {
+        return;
+    }
+    if BINK_SOURCE_CAPTURE_ENABLED.load(Ordering::Acquire) == 0 {
         return;
     }
     if settings.bink_plane_auto_source {

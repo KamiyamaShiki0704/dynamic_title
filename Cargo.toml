@@ -7,6 +7,8 @@ license = "MIT OR Apache-2.0"
 publish = false
 
 [dependencies]
+eldenring = { path = "../../fromsoftware-rs-0.14.0/crates/eldenring" }
+fromsoftware-shared = { path = "../../fromsoftware-rs-0.14.0/crates/shared" }
 ilhook = { version = "2.3.0", features = ["x64"] }
 
 [dependencies.windows]

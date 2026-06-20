@@ -2700,3 +2700,882 @@ The GitHub repository now contains the automatic source-selection implementation
 ### Next Step
 
 Optionally commit and push this status-only entry.
+
+## 2026-06-19 23:50 CST - BK2 to MP4 Helper Added
+
+### Completed
+
+- User narrowed the request to BK2 -> MP4 only; MP4 -> BK2 will remain a manual RADVideo workflow.
+- Added a helper folder:
+  - `F:\GoldenAge\fromsoftware-rs\_Project\dynamic-title-bg\_Tools\bk2-to-mp4`
+- Added `BK2ToMP4.ps1`:
+  - accepts one or more `.bk2` inputs;
+  - writes `.mp4` beside the source by default;
+  - supports `-OutputDir`;
+  - supports `-Crf`, `-Preset`, and `-Overwrite`;
+  - auto-detects `G:\ffmpeg\ffmpeg-8.0-essentials_build\bin\ffmpeg.exe`, then falls back to `ffmpeg.exe` from `PATH`.
+- Added `BK2ToMP4.bat` for drag-and-drop use.
+- Added a local README with usage examples.
+- Tested conversion with the current game-root `00001010.bk2`:
+  - input: `F:\SteamLibrary\steamapps\common\ELDEN RING\Game\movie\00001010.bk2`
+  - output: `F:\GoldenAge\fromsoftware-rs\_Project\dynamic-title-bg\target\bk2-to-mp4-test\00001010.mp4`
+  - conversion completed successfully.
+
+### Modified Files
+
+- `F:\GoldenAge\fromsoftware-rs\_Project\dynamic-title-bg\PLANS.md`
+- `F:\GoldenAge\fromsoftware-rs\_Project\dynamic-title-bg\TASK_STATUS.md`
+- `F:\GoldenAge\fromsoftware-rs\_Project\dynamic-title-bg\_Tools\bk2-to-mp4\BK2ToMP4.ps1`
+- `F:\GoldenAge\fromsoftware-rs\_Project\dynamic-title-bg\_Tools\bk2-to-mp4\BK2ToMP4.bat`
+- `F:\GoldenAge\fromsoftware-rs\_Project\dynamic-title-bg\_Tools\bk2-to-mp4\README.md`
+
+### Current Judgment
+
+The helper is ready for local use. It is intentionally one-way: BK2 -> MP4. MP4 -> BK2 should stay manual through RADVideo unless a reliable command-line encode flow is confirmed.
+
+### Unresolved
+
+- The helper has not been committed or pushed yet.
+- ffmpeg prints a harmless warning about `-b:a` when the source BK2 has no audio stream.
+
+### Next Step
+
+Use drag-and-drop on `BK2ToMP4.bat` or call `BK2ToMP4.ps1` directly. Commit/push the tool if it should be included in the GitHub repository.
+
+## 2026-06-19 23:57 CST - BK2 Tool Bink2 Detection Added
+
+### Completed
+
+- Investigated user conversion failure for:
+  - `F:\GoldenAge\fromsoftware-rs\_Project\dynamic-title-bg\_Tools\bk2-to-mp4\00001010.bk2`
+- Confirmed the file header is `KB2n`, not `BIK*`.
+- Confirmed ffprobe/ffmpeg reports:
+  - `Invalid data found when processing input`
+- Determined the failure is due to ffmpeg not decoding this Bink 2 `KB2*` variant, not due to script arguments.
+- Updated `BK2ToMP4.ps1`:
+  - reads the first four bytes before conversion;
+  - converts only `BIK*` files through ffmpeg;
+  - detects `KB2*` files and prints a clear unsupported-Bink2 message;
+  - optionally opens RADVideo with `-OpenRadOnUnsupported`.
+- Updated `_Tools\bk2-to-mp4\README.md` with the Bink 2 note.
+- Tested the updated script against the `KB2n` file; it now skips cleanly without a PowerShell exception.
+
+### Modified Files
+
+- `F:\GoldenAge\fromsoftware-rs\_Project\dynamic-title-bg\TASK_STATUS.md`
+- `F:\GoldenAge\fromsoftware-rs\_Project\dynamic-title-bg\_Tools\bk2-to-mp4\BK2ToMP4.ps1`
+- `F:\GoldenAge\fromsoftware-rs\_Project\dynamic-title-bg\_Tools\bk2-to-mp4\README.md`
+
+### Current Judgment
+
+The helper can fully automate BK2 -> MP4 only for ffmpeg-decodable Bink files, typically `BIK*`. The user's current `00001010.bk2` is `KB2n`, a Bink 2 variant that ffmpeg cannot decode. RADVideo is needed for that file.
+
+### Unresolved
+
+- Need to decide whether to keep the RADVideo fallback as an optional launcher only, or search for a true command-line RAD export path later.
+- The helper remains uncommitted/unpushed.
+
+### Next Step
+
+For `KB2*` files, use:
+
+```powershell
+.\BK2ToMP4.ps1 "F:\path\movie.bk2" -OpenRadOnUnsupported
+```
+
+Then export manually in RADVideo.
+
+## 2026-06-20 00:20 CST - KB2n Conversion Alternatives
+
+### Completed
+
+- Re-read project-local `TASK_STATUS.md` and `PLANS.md` before continuing after resume.
+- Checked the current test BK2 header:
+  - `F:\GoldenAge\fromsoftware-rs\_Project\dynamic-title-bg\_Tools\bk2-to-mp4\00001010.bk2`
+  - signature is `KB2n`, not `BIK*`.
+- Checked the local RADVideo folder:
+  - `G:\Modification\FSModify\Sound\CG修改\RADVideo`
+  - available tools are `radvideo64.exe`, `radvideo32.exe`, `radtools.exe`, `binkplay.exe`, `smackplw.exe`, and `uninstall.exe`.
+  - no standalone command-line Bink conversion executable was found in that folder.
+
+### Modified Files
+
+- `F:\GoldenAge\fromsoftware-rs\_Project\dynamic-title-bg\TASK_STATUS.md`
+
+### Current Judgment
+
+This BK2 is a `KB2n` Bink 2 file. ffmpeg cannot decode it, and if RADVideo also cannot export it, the reliable route is probably not normal standalone transcoding. Elden Ring can still play it because the game runtime has its own Bink2 decoder path.
+
+### Unresolved
+
+- Need to know whether RADVideo cannot open the file at all, or can open/play it but cannot export.
+- No local command-line Bink2 decoder/exporter is currently available.
+
+### Next Step
+
+Recommend using the game/runtime playback path as the decoder and capturing the result, either manually through OBS/Game Bar or later through a DLL capture/export mode that grabs the rendered movie texture or backbuffer and assembles MP4 with ffmpeg.
+
+## 2026-06-20 00:30 CST - MP4 Blue-to-Gold Color Test
+
+### Completed
+
+- Re-read project-local `TASK_STATUS.md` before handling the media edit request.
+- Confirmed source MP4 exists:
+  - `G:\Modification\FSModify\Sound\CG修改\RADVideo\00001010.mp4`
+- Confirmed source properties:
+  - `1920x1080`
+  - `60 fps`
+  - duration about `11.8s`
+  - AAC audio stream present
+- Extracted an original preview frame:
+  - `G:\Modification\FSModify\Sound\CG修改\RADVideo\00001010_frame_original.png`
+- Created a gold-tone preview frame:
+  - `G:\Modification\FSModify\Sound\CG修改\RADVideo\00001010_frame_gold_test.png`
+- Rendered a full gold-tone MP4 without overwriting the original:
+  - `G:\Modification\FSModify\Sound\CG修改\RADVideo\00001010_gold.mp4`
+- Verified output properties:
+  - `1920x1080`
+  - `60 fps`
+  - duration about `11.8s`
+  - original AAC audio copied
+- Extracted an output check frame:
+  - `G:\Modification\FSModify\Sound\CG修改\RADVideo\00001010_gold_frame.png`
+
+### Modified Files
+
+- `G:\Modification\FSModify\Sound\CG修改\RADVideo\00001010_gold.mp4`
+- `G:\Modification\FSModify\Sound\CG修改\RADVideo\00001010_frame_original.png`
+- `G:\Modification\FSModify\Sound\CG修改\RADVideo\00001010_frame_gold_test.png`
+- `G:\Modification\FSModify\Sound\CG修改\RADVideo\00001010_gold_frame.png`
+- `F:\GoldenAge\fromsoftware-rs\_Project\dynamic-title-bg\TASK_STATUS.md`
+
+### Current Judgment
+
+The blue-tinted MP4 can be converted to a darker gold/amber tone with ffmpeg color filters. The current pass is a non-destructive test output and may need further tuning if the user wants a brighter yellow-gold or less orange look.
+
+### Unresolved
+
+- Need user visual approval on the gold-tone pass.
+- If this is intended for BK2 replacement, the edited MP4 still needs manual RADVideo re-encoding back to BK2.
+
+### Next Step
+
+Review `00001010_gold.mp4`. If the tone is acceptable, use it as the MP4 source for manual BK2 encoding. If not, tune the filter toward brighter gold or subtler warm color.
+
+## 2026-06-20 00:35 CST - Erdtree Gold High-Bitrate MP4
+
+### Completed
+
+- Explained the first gold MP4 size reduction:
+  - original video bitrate was about `20 Mbps`;
+  - first gold pass used quality-based `CRF 18`;
+  - the dark, low-complexity image compressed to about `1.4 Mbps`, so the file became much smaller.
+- Created a brighter/yellower Erdtree-gold preview frame:
+  - `G:\Modification\FSModify\Sound\CG修改\RADVideo\00001010_gold_erdtree_hq_frame.png`
+- Rendered a high-bitrate Erdtree-gold version without overwriting prior files:
+  - `G:\Modification\FSModify\Sound\CG修改\RADVideo\00001010_gold_erdtree_hq.mp4`
+- Encoded the high-bitrate version near the original bitrate:
+  - video bitrate about `20.26 Mbps`
+  - file size about `30.0 MB`
+  - `1920x1080`
+  - `60 fps`
+  - original AAC audio copied
+
+### Modified Files
+
+- `G:\Modification\FSModify\Sound\CG修改\RADVideo\00001010_gold_erdtree_hq.mp4`
+- `G:\Modification\FSModify\Sound\CG修改\RADVideo\00001010_gold_erdtree_hq_frame.png`
+- `F:\GoldenAge\fromsoftware-rs\_Project\dynamic-title-bg\TASK_STATUS.md`
+
+### Current Judgment
+
+The high-bitrate Erdtree-gold version addresses both concerns: it is more yellow-gold than the first amber pass and its size/bitrate is close to the original MP4, making it a better intermediate source for later BK2 encoding.
+
+### Unresolved
+
+- Need user visual approval of the final tone.
+- The MP4 still needs manual RADVideo conversion if it will replace `00001010.bk2`.
+
+### Next Step
+
+Review `00001010_gold_erdtree_hq.mp4`. If acceptable, use it as the source for RADVideo MP4-to-BK2 conversion.
+
+## 2026-06-20 00:44 CST - New Source MP4 Recolored With Same Erdtree Gold Filter
+
+### Completed
+
+- Re-read project-local `TASK_STATUS.md` before processing the refreshed source MP4.
+- Confirmed the source `00001010.mp4` was replaced/updated:
+  - `G:\Modification\FSModify\Sound\CG修改\RADVideo\00001010.mp4`
+  - size about `59.8 MB`
+  - `1920x1080`
+  - `60 fps`
+  - video bitrate about `39.5 Mbps`
+  - duration about `12.1s`
+  - AAC audio present
+- Applied the same Erdtree-gold ffmpeg color filter used for the previous high-bitrate version.
+- Created preview frame:
+  - `G:\Modification\FSModify\Sound\CG修改\RADVideo\00001010_gold_erdtree_hq_v2_frame.png`
+- Rendered high-bitrate recolored output:
+  - `G:\Modification\FSModify\Sound\CG修改\RADVideo\00001010_gold_erdtree_hq_v2.mp4`
+- Verified output:
+  - size about `62.3 MB`
+  - `1920x1080`
+  - `60 fps`
+  - video bitrate about `41.1 Mbps`
+  - duration about `12.1s`
+  - AAC audio copied
+
+### Modified Files
+
+- `G:\Modification\FSModify\Sound\CG修改\RADVideo\00001010_gold_erdtree_hq_v2.mp4`
+- `G:\Modification\FSModify\Sound\CG修改\RADVideo\00001010_gold_erdtree_hq_v2_frame.png`
+- `F:\GoldenAge\fromsoftware-rs\_Project\dynamic-title-bg\TASK_STATUS.md`
+
+### Current Judgment
+
+The refreshed source MP4 has now been recolored with the same Erdtree-gold look while keeping a bitrate close to the new source. This is the preferred MP4 source for another RADVideo MP4-to-BK2 conversion test.
+
+### Unresolved
+
+- Need user visual approval after previewing the new output.
+- Still requires manual RADVideo conversion back to BK2 if it will be used in-game.
+
+### Next Step
+
+Review `00001010_gold_erdtree_hq_v2.mp4`, then use it as the RADVideo input if the tone is acceptable.
+
+## 2026-06-20 00:49 CST - Debanded More-Golden MP4
+
+### Completed
+
+- Re-read project-local `TASK_STATUS.md` before continuing media processing.
+- Diagnosed the visible blocky color zones as dark-area banding/posterization from strong 8-bit `yuv420p` color remapping.
+- Tested higher-precision filter chains with:
+  - `format=gbrp16le` before color operations;
+  - stronger gold/yellow color balance;
+  - `deband` to smooth hard color transitions;
+  - subtle temporal/uniform noise as dithering to hide residual banding.
+- Rejected v4 preview because it pushed mid/dark areas too green.
+- Selected v5 as the better balance:
+  - more golden than v2;
+  - less green than v4;
+  - reduced visible banding compared with v2.
+- Created preview frame:
+  - `G:\Modification\FSModify\Sound\CG修改\RADVideo\00001010_gold_erdtree_deband_v5_frame.png`
+- Rendered full output:
+  - `G:\Modification\FSModify\Sound\CG修改\RADVideo\00001010_gold_erdtree_deband_v5.mp4`
+- Verified output:
+  - size about `68.1 MB`
+  - `1920x1080`
+  - `60 fps`
+  - `yuv420p`
+  - video bitrate about `45.0 Mbps`
+  - AAC audio copied
+
+### Modified Files
+
+- `G:\Modification\FSModify\Sound\CG修改\RADVideo\00001010_gold_erdtree_deband_v3_frame.png`
+- `G:\Modification\FSModify\Sound\CG修改\RADVideo\00001010_gold_erdtree_deband_v4_frame.png`
+- `G:\Modification\FSModify\Sound\CG修改\RADVideo\00001010_gold_erdtree_deband_v5_frame.png`
+- `G:\Modification\FSModify\Sound\CG修改\RADVideo\00001010_gold_erdtree_deband_v5.mp4`
+- `F:\GoldenAge\fromsoftware-rs\_Project\dynamic-title-bg\TASK_STATUS.md`
+
+### Current Judgment
+
+Banding can be reduced but not perfectly removed from an already 8-bit `yuv420p` source after aggressive hue/color shifts. The v5 output uses debanding plus subtle dithering/noise, which should make the blocky regions less obvious in motion. It is also more golden than v2 while avoiding the green cast seen in v4.
+
+### Unresolved
+
+- Need user visual approval in the actual game/BK2 conversion path.
+- If RADVideo re-encoding to BK2 introduces new banding, a stronger intermediate such as ProRes/10-bit MOV may be worth testing if RADVideo accepts it.
+
+### Next Step
+
+Review `00001010_gold_erdtree_deband_v5.mp4`. If acceptable, use it as the next RADVideo MP4-to-BK2 source.
+
+## 2026-06-20 17:31 CST - Stop Movie Playback After Leaving Title
+
+### Completed
+
+- Re-read the project status files before changing code.
+- Diagnosed the 60 fps -> 30 fps regression as likely caused by the ER native `CSMovieImp/CSMovieIns` playback object continuing to run after title/menu playback starts.
+- Rejected render throttling after user clarified the desired behavior:
+  - title/main menu should keep 60 fps video playback;
+  - gameplay should stop/disable BK2 playback.
+- Added a title-gate stop monitor:
+  - tracks the `CSMovieIns` pointer used by `movie_imp_trigger`;
+  - waits until title/menu task groups allow playback at least once;
+  - closes the BinkTexture and clears MovieIns active/state fields when the gate later closes, such as entering gameplay/loading/HUD default state.
+- Added config keys:
+  - `movie_imp_stop_on_gameplay=true`
+  - `movie_imp_gate_check_ms=100`
+- Added `eldenring` and `fromsoftware-shared` path dependencies so the current project can read task groups, loading state, and HUD state.
+- Updated example/deployed ini to keep logging/probes off and enable stop-on-gameplay.
+- Ran `cargo fmt`.
+- Built successfully with `cargo build --release --offline`.
+- Deployed the rebuilt DLL to:
+  - `F:\GoldenAge\dll\dynamic_title\dynamic_title_bg.dll`
+- Backed up previous deployed files:
+  - `F:\GoldenAge\dll\dynamic_title\dynamic_title_bg.dll.before_stop_on_gameplay_20260620_172939`
+  - `F:\GoldenAge\dll\dynamic_title\dynamic-title-bg.ini.before_stop_on_gameplay_20260620_172939`
+
+### Modified Files
+
+- `F:\GoldenAge\fromsoftware-rs\AGENTS.md`
+- `F:\GoldenAge\fromsoftware-rs\_Project\dynamic-title-bg\Cargo.toml`
+- `F:\GoldenAge\fromsoftware-rs\_Project\dynamic-title-bg\Cargo.lock`
+- `F:\GoldenAge\fromsoftware-rs\_Project\dynamic-title-bg\PLANS.md`
+- `F:\GoldenAge\fromsoftware-rs\_Project\dynamic-title-bg\TASK_STATUS.md`
+- `F:\GoldenAge\fromsoftware-rs\_Project\dynamic-title-bg\dynamic-title-bg.example.ini`
+- `F:\GoldenAge\fromsoftware-rs\_Project\dynamic-title-bg\src\lib.rs`
+- `F:\GoldenAge\fromsoftware-rs\_Project\dynamic-title-bg\src\bink_probe.rs`
+- `F:\GoldenAge\dll\dynamic_title\dynamic-title-bg.ini`
+- `F:\GoldenAge\dll\dynamic_title\dynamic_title_bg.dll`
+
+### Current Judgment
+
+The active fix now preserves full-rate title playback and stops the movie object only after the title gate has been observed open and then closes. This should avoid the previous problem where the movie subsystem remained active into gameplay and continued to affect frame pacing.
+
+### Unresolved
+
+- Needs in-game validation:
+  - title screen video should remain smooth at 60 fps;
+  - after starting/loading into gameplay, the FPS should return to normal 60 fps;
+  - no crash or dangling audio should remain after the stop monitor closes the MovieIns.
+- `git` was not available in the current shell PATH, so local git status was not checked in this turn.
+
+### Next Step
+
+Test ER with the deployed DLL/ini. If gameplay is still capped after entering the game, enable `log_enabled=true` for one run and check whether `movie imp stop monitor: closed` appears after leaving the title menu.
+
+## 2026-06-20 17:38 CST - Stop Monitor Arming Bug Fixed
+
+### Completed
+
+- Read the new ER log after the user's retest.
+- Confirmed the previous stop monitor started but never closed the MovieIns:
+  - `movie imp stop monitor: started ... title_flow=false title_step=false ...`
+  - later gate changes still had `title_flow=false title_step=false`
+  - no `movie imp stop monitor: closed` line appeared.
+- Determined the bug: the old arming condition depended on `title_flow/title_step`, but the current MovieImp bridge path does not expose those task groups as active.
+- Updated `PLANS.md` with the follow-up adjustment before editing.
+- Changed stop logic:
+  - successful `movie_imp_trigger` now effectively arms the monitor;
+  - added `movie_imp_stop_grace_ms`, default `2000`, to avoid immediately closing during initial title loading;
+  - after grace, the monitor closes MovieIns when `loading`, `hud_default`, or `ingame_flow` becomes true;
+  - `common_flow` is no longer a close condition so title-side option menus should not stop the background.
+- Updated example ini and deployed ini with:
+  - `movie_imp_stop_grace_ms=2000`
+  - `log_enabled=true` retained for the next validation run.
+- Ran `cargo fmt`.
+- Built successfully with `cargo build --release --offline`.
+- Deployed rebuilt DLL to:
+  - `F:\GoldenAge\dll\dynamic_title\dynamic_title_bg.dll`
+- Backed up previous deployed files:
+  - `F:\GoldenAge\dll\dynamic_title\dynamic_title_bg.dll.before_stop_grace_20260620_173722`
+  - `F:\GoldenAge\dll\dynamic_title\dynamic-title-bg.ini.before_stop_grace_20260620_173722`
+- Cleared `F:\GoldenAge\dll\dynamic_title\dynamic-title-bg.log` for the next test.
+
+### Modified Files
+
+- `F:\GoldenAge\fromsoftware-rs\_Project\dynamic-title-bg\PLANS.md`
+- `F:\GoldenAge\fromsoftware-rs\_Project\dynamic-title-bg\TASK_STATUS.md`
+- `F:\GoldenAge\fromsoftware-rs\_Project\dynamic-title-bg\dynamic-title-bg.example.ini`
+- `F:\GoldenAge\fromsoftware-rs\_Project\dynamic-title-bg\src\lib.rs`
+- `F:\GoldenAge\fromsoftware-rs\_Project\dynamic-title-bg\src\bink_probe.rs`
+- `F:\GoldenAge\dll\dynamic_title\dynamic-title-bg.ini`
+- `F:\GoldenAge\dll\dynamic_title\dynamic_title_bg.dll`
+
+### Current Judgment
+
+The earlier fix failed because it waited for a title task-group state that never became true in the current bridge path. The new fix should close playback during the transition into gameplay/loading while preserving full-rate title playback.
+
+### Unresolved
+
+- Need user validation with the new DLL.
+- Expected new log sequence:
+  - `movie imp stop monitor: armed after grace ...`
+  - during game entry/loading: `movie imp stop monitor: closing ...`
+  - then `movie imp stop monitor: closed ...`
+- If FPS still remains 30 after the `closed` line, the cap is not just MovieIns state and the next target is Bink/movie global timing state or a D3D present interval side effect.
+
+### Next Step
+
+Run ER once with the deployed DLL/ini. Stay on the title menu long enough to confirm the video plays smoothly, then enter gameplay. If it still sticks to 30 fps, send the fresh `F:\GoldenAge\dll\dynamic_title\dynamic-title-bg.log`.
+
+## 2026-06-20 17:51 CST - Restore Native Moving Movie Path
+
+### Completed
+
+- Re-read the project status files and current deployed ER log after the latest test report.
+- Interpreted the frozen-video result as expected from `movie_imp_option=0`: it avoids the native movie pacing path but also stops Bink frame advancement.
+- Accepted the new target based on user validation: native BK2 playback may keep the title menu at 30 fps, but the DLL must close the movie path before gameplay so in-game FPS returns to normal.
+- Restored `movie_imp_option=1` in source defaults, example ini, and deployed ER ini.
+- Kept the stable-title stop monitor logic from the previous change:
+  - wait until title state is stable (`loading=false`, `hud_default=false`, `ingame_flow=false`);
+  - only after that, close MovieIns on later loading/gameplay/HUD-default signals.
+- Ran `cargo fmt`.
+- Built successfully with `cargo build --release --offline`.
+- Deployed the rebuilt DLL to:
+  - `F:\GoldenAge\dll\dynamic_title\dynamic_title_bg.dll`
+- Backed up previous deployed files with suffix:
+  - `.before_restore_option1_20260620_175026`
+- Cleared `F:\GoldenAge\dll\dynamic_title\dynamic-title-bg.log` for the next validation run.
+
+### Modified Files
+
+- `F:\GoldenAge\fromsoftware-rs\_Project\dynamic-title-bg\PLANS.md`
+- `F:\GoldenAge\fromsoftware-rs\_Project\dynamic-title-bg\TASK_STATUS.md`
+- `F:\GoldenAge\fromsoftware-rs\_Project\dynamic-title-bg\dynamic-title-bg.example.ini`
+- `F:\GoldenAge\fromsoftware-rs\_Project\dynamic-title-bg\src\lib.rs`
+- `F:\GoldenAge\dll\dynamic_title\dynamic-title-bg.ini`
+- `F:\GoldenAge\dll\dynamic_title\dynamic_title_bg.dll`
+
+### Current Judgment
+
+`movie_imp_option=1` is required for moving native BK2 playback. The 30 fps title-menu pacing appears to be the native FromSoftware movie behavior rather than a project-specific regression. The practical fix is therefore to let the title movie run natively, then close the tracked MovieIns once the user leaves the stable title menu.
+
+### Unresolved
+
+- Needs one ER validation run:
+  - title video should move again;
+  - title menu may be 30 fps;
+  - entering gameplay/loading should trigger `movie imp stop monitor: closed`;
+  - gameplay should return to normal FPS after close.
+- If gameplay remains capped after a `closed` log line, another global movie/Bink timing state must be reset.
+
+### Next Step
+
+Run ER with the deployed DLL/ini. Stay on the title menu until the video is visibly moving, then enter gameplay and check the fresh log for `movie imp stop monitor: armed from stable title` followed by `movie imp stop monitor: closed`.
+
+## 2026-06-20 17:56 CST - Add World Player Stop Signal
+
+### Completed
+
+- Read the latest ER test log after the user reported gameplay still locked to 30 fps.
+- Confirmed the stop monitor did not close MovieIns:
+  - `movie imp stop monitor: armed from stable title ...` appeared;
+  - no `closing` or `closed` line appeared afterward.
+- Determined the current leave-title signals were insufficient for this path because no later `loading`, `hud_default`, or `ingame_flow` transition was logged after arming.
+- Added `WorldChrMan::instance().main_player.is_some()` as `world_player` in the stop snapshot.
+- Kept the signal gated behind stable-title arming, so it cannot close the movie during initial title loading.
+- Updated the plan with this follow-up.
+- Ran `cargo fmt`.
+- Built successfully with `cargo build --release --offline`.
+- Deployed the rebuilt DLL to:
+  - `F:\GoldenAge\dll\dynamic_title\dynamic_title_bg.dll`
+- Backed up previous deployed files with suffix:
+  - `.before_world_player_stop_20260620_175552`
+- Cleared `F:\GoldenAge\dll\dynamic_title\dynamic-title-bg.log`.
+
+### Modified Files
+
+- `F:\GoldenAge\fromsoftware-rs\_Project\dynamic-title-bg\PLANS.md`
+- `F:\GoldenAge\fromsoftware-rs\_Project\dynamic-title-bg\TASK_STATUS.md`
+- `F:\GoldenAge\fromsoftware-rs\_Project\dynamic-title-bg\src\bink_probe.rs`
+- `F:\GoldenAge\dll\dynamic_title\dynamic_title_bg.dll`
+
+### Current Judgment
+
+The previous test was not a residual timing-state problem yet; MovieIns simply never closed. `WorldChrMan.main_player` should be a more reliable proof that gameplay/world state exists than the current task-group/HUD/loading checks.
+
+### Unresolved
+
+- Needs another ER validation run.
+- If `world_player=true` appears and MovieIns closes but gameplay still stays at 30 fps, then the next target is a global movie/Bink timing or frame-pacing field that survives MovieIns close.
+
+### Next Step
+
+Run ER with the deployed DLL. Expected log sequence:
+
+```text
+movie imp stop monitor: armed from stable title ...
+movie imp stop monitor: gate changed ... world_player=true
+movie imp stop monitor: closing ... reason=left title menu gate
+movie imp stop monitor: closed ...
+```
+## 2026-06-20 18:00 CST - World Player Bypasses Arming
+
+### Completed
+
+- Read the latest ER log after the user reported gameplay still locked to 30 fps.
+- Confirmed `world_player=true` did appear, but before the monitor reached `armed from stable title`.
+- Confirmed no `closing` or `closed` line appeared, so MovieIns was still not being stopped.
+- Updated `PLANS.md` with the new follow-up before editing.
+- Changed the stop loop so `world_player=true` closes MovieIns after the initial grace period even if stable-title arming has not happened yet.
+- Kept stable-title arming for weaker signals such as `loading` and `hud_default`.
+- Ran `cargo fmt`.
+- Built successfully with `cargo build --release --offline`.
+- Deployed the rebuilt DLL to:
+  - `F:\GoldenAge\dll\dynamic_title\dynamic_title_bg.dll`
+- Backed up previous deployed files with suffix:
+  - `.before_world_player_bypass_20260620_175933`
+- Cleared `F:\GoldenAge\dll\dynamic_title\dynamic-title-bg.log`.
+
+### Modified Files
+
+- `F:\GoldenAge\fromsoftware-rs\_Project\dynamic-title-bg\PLANS.md`
+- `F:\GoldenAge\fromsoftware-rs\_Project\dynamic-title-bg\TASK_STATUS.md`
+- `F:\GoldenAge\fromsoftware-rs\_Project\dynamic-title-bg\src\bink_probe.rs`
+- `F:\GoldenAge\dll\dynamic_title\dynamic_title_bg.dll`
+
+### Current Judgment
+
+The blocker is still missed stop timing, not yet a proven residual global timing state. The latest log showed the right in-world signal, but the previous arming rule ignored it. Letting `world_player=true` bypass arming should close MovieIns during game-load/entry.
+
+### Unresolved
+
+- Needs another ER validation run.
+- If this run logs `movie imp stop monitor: closed` and gameplay is still 30 fps, then the next phase is resetting a residual MovieImp/Bink timing state.
+
+### Next Step
+
+Run ER again. Expected line:
+
+```text
+movie imp stop monitor: closing ... reason=world player active
+```
+
+## 2026-06-20 18:11 CST - Re-arm Title BK2 After Returning From Gameplay
+
+### Completed
+
+- Re-read project-local `AGENTS.md`, `TASK_STATUS.md`, and `PLANS.md` before continuing.
+- Confirmed the current behavior: title/menu BK2 playback is allowed to run at native 30 fps, and entering gameplay now restores normal FPS after MovieIns close.
+- Added a re-arm plan to `PLANS.md` before modifying code.
+- Changed MovieImp trigger state from strictly one-shot to per-title-cycle:
+  - trigger parameters are saved for later reuse;
+  - `MOVIE_IMP_TRIGGER_STARTED` is reset after MovieIns is closed;
+  - `MOVIE_STOP_MONITOR_STARTED` is reset after close so the next playback cycle can be monitored again.
+- Added a return-to-title monitor after close:
+  - waits for `TitleGateSnapshot::title_ready()` after gameplay;
+  - then re-runs the saved MovieImp trigger with reason `returned to title`.
+- Added a guard so delayed MovieImp setup is skipped if `world_player` is still active, avoiding accidental BK2 restart during gameplay.
+- Added `dx12_title_texture::reset_bink_bridge_cycle()` so the title descriptor callback/source bridge can be reused on a later return to the title menu.
+- Ran `cargo fmt`.
+- Built successfully with `cargo build --release --offline`.
+- Deployed rebuilt DLL to:
+  - `F:\GoldenAge\dll\dynamic_title\dynamic_title_bg.dll`
+- Backed up the previous deployed DLL with suffix:
+  - `.before_return_rearm_20260620_181025`
+- Cleared deployed ER log for the next validation run.
+
+### Modified Files
+
+- `F:\GoldenAge\fromsoftware-rs\_Project\dynamic-title-bg\PLANS.md`
+- `F:\GoldenAge\fromsoftware-rs\_Project\dynamic-title-bg\TASK_STATUS.md`
+- `F:\GoldenAge\fromsoftware-rs\_Project\dynamic-title-bg\src\bink_probe.rs`
+- `F:\GoldenAge\fromsoftware-rs\_Project\dynamic-title-bg\src\dx12_title_texture.rs`
+- `F:\GoldenAge\dll\dynamic_title\dynamic_title_bg.dll`
+
+### Current Judgment
+
+The cleanest way to support returning from gameplay to the main menu is not to keep ER's native MovieImp alive during gameplay. Instead, each title-menu visit becomes a cycle: start BK2 on the visible title target, close it on gameplay entry to restore FPS, then re-arm when the game returns to a title-ready state.
+
+### Unresolved
+
+- Needs validation of the uncommon path:
+  - title menu starts with moving BK2;
+  - entering gameplay restores FPS;
+  - quitting back to the main menu restarts the BK2 instead of leaving a static image.
+- If return-to-title still stays static, inspect whether the title descriptor is recreated before or after the re-arm monitor fires.
+
+### Next Step
+
+Test one full cycle in ER: main menu -> enter gameplay -> quit back to main menu. With `log_enabled=true`, useful lines should include `movie imp stop monitor: closed`, `dx12 title texture probe: reset bink bridge cycle`, then either `movie imp return rearm: title-ready detected` or a new `title target callback fired` followed by another `movie imp trigger`.
+
+## 2026-06-20 18:16 CST - Retry Return Re-arm and Preserve Descriptor
+
+### Completed
+
+- Read the latest deployed ER log after the return-to-title test.
+- Confirmed the first title cycle, gameplay stop, and gameplay FPS restoration are working.
+- Found the return-to-title failure cause in the log:
+  - `movie imp return rearm: title-ready detected` fired;
+  - the immediate setup failed because `global[main.exe+0x45878A8]=0x0`, meaning `CSMovieImp` had not been recreated yet.
+- Reviewed `F:\GoldenAge\fromsoftware-rs\_Example\fs-title-skip-master`:
+  - it hooks a generic engine-flag getter and returns false for flags `1..6`;
+  - useful as evidence that title-flow flags exist, but not a direct ready signal for this MovieImp bridge.
+- Updated `PLANS.md` with the retry/descriptor preservation plan before editing.
+- Changed MovieImp trigger setup to return success/failure.
+- Added bounded retry behavior:
+  - after the configured delay, try setup up to 120 times;
+  - wait 500ms between attempts;
+  - reset the trigger guard if retries are exhausted;
+  - abort/reset immediately if `world_player` is active, to avoid starting movie playback in gameplay.
+- Changed `reset_bink_bridge_cycle()` to preserve `STORED_TITLE_DESCRIPTOR` and only clear the old Bink source / callback fired state, because the `MENU_DummyMovie` descriptor appears not to be recreated when returning to title.
+- Ran `cargo fmt`.
+- Built successfully with `cargo build --release --offline`.
+- Deployed rebuilt DLL to:
+  - `F:\GoldenAge\dll\dynamic_title\dynamic_title_bg.dll`
+- Backed up the previous deployed DLL with suffix:
+  - `.before_return_retry_20260620_181601`
+- Cleared deployed ER log for the next validation run.
+
+### Modified Files
+
+- `F:\GoldenAge\fromsoftware-rs\_Project\dynamic-title-bg\PLANS.md`
+- `F:\GoldenAge\fromsoftware-rs\_Project\dynamic-title-bg\TASK_STATUS.md`
+- `F:\GoldenAge\fromsoftware-rs\_Project\dynamic-title-bg\src\bink_probe.rs`
+- `F:\GoldenAge\fromsoftware-rs\_Project\dynamic-title-bg\src\dx12_title_texture.rs`
+- `F:\GoldenAge\dll\dynamic_title\dynamic_title_bg.dll`
+
+### Current Judgment
+
+The previous re-arm implementation detected return-to-title too early and consumed the trigger attempt while `CSMovieImp` was still null. The right fix is to retry until MovieImp is available, while preserving the already-known title descriptor so a later Bink RGB source can be bridged into the same visible `MENU_DummyMovie` slot.
+
+### Unresolved
+
+- Needs another full validation cycle.
+- If the second setup succeeds but the menu remains static, inspect whether a new `DXGI_FORMAT(28)` Bink RGB source appears after setup and whether `bink bridge applied` targets the preserved descriptor.
+
+### Next Step
+
+Test ER again: main menu -> enter gameplay -> quit back to main menu. Expected return-side log lines include setup retry messages while `CSMovieImp` is null, then a second successful `movie imp trigger: CSMovieImp=...`, followed by `auto stored bink source` and `bink bridge applied`.
+
+## 2026-06-20 18:22 CST - Restore Dummy and Gate Bink Source Capture
+
+### Completed
+
+- Re-read `TASK_STATUS.md` and `PLANS.md`, then inspected the latest ER log after the user reported black title background on return.
+- Confirmed the regression cause:
+  - return-to-title retry still found `CSMovieImp` global null repeatedly;
+  - because the old title descriptor was preserved, auto-source captured an unrelated `3840x2160 DXGI_FORMAT(28)` resource and bridged it into the title slot;
+  - this produced a black/no-loaded background instead of the previous static image.
+- Added a new plan to `PLANS.md` before editing.
+- Added stored-title-target restoration in `dx12_title_texture.rs`:
+  - store the original `MENU_DummyMovie` resource, SRV desc, descriptor handle, and device pointer when the target descriptor is first found;
+  - remember the original `CreateShaderResourceView` function pointer;
+  - restore the original dummy descriptor during bridge reset.
+- Added Bink source capture gating:
+  - source capture starts disabled;
+  - `reset_bink_bridge_cycle()` disables source capture and clears old source state;
+  - `enable_bink_bridge_source_capture()` enables capture only after MovieImp setup succeeds.
+- Updated `bink_probe.rs` so successful MovieImp setup calls `enable_bink_bridge_source_capture("movie imp setup succeeded")` before Bink RGB resources are expected.
+- Ran `cargo fmt`.
+- Built successfully with `cargo build --release --offline`.
+- Deployed rebuilt DLL to:
+  - `F:\GoldenAge\dll\dynamic_title\dynamic_title_bg.dll`
+- Backed up the previous deployed DLL with suffix:
+  - `.before_restore_dummy_20260620_182124`
+- Cleared deployed ER log for the next validation run.
+
+### Modified Files
+
+- `F:\GoldenAge\fromsoftware-rs\_Project\dynamic-title-bg\PLANS.md`
+- `F:\GoldenAge\fromsoftware-rs\_Project\dynamic-title-bg\TASK_STATUS.md`
+- `F:\GoldenAge\fromsoftware-rs\_Project\dynamic-title-bg\src\bink_probe.rs`
+- `F:\GoldenAge\fromsoftware-rs\_Project\dynamic-title-bg\src\dx12_title_texture.rs`
+- `F:\GoldenAge\dll\dynamic_title\dynamic_title_bg.dll`
+
+### Current Judgment
+
+ER appears not to recreate `CSMovieImp` after returning from gameplay to title, at least not through the same global pointer used by the initial title entry. The current safe behavior should be: first title visit plays BK2; gameplay closes MovieIns and restores FPS; if return replay cannot start because MovieImp remains null, the title should fall back to the original static dummy instead of black.
+
+### Unresolved
+
+- Need validation that initial title playback still works with source-capture gating.
+- Need validation that returning to title no longer blacks out when MovieImp remains null.
+- True return-to-title replay may require a different playback owner than `CSMovieImp+0x38`, or a later title-specific initialization signal if one exists.
+
+### Next Step
+
+Test ER again: first title playback, enter gameplay, then quit back to title. Expected log on the first cycle should show `enabled bink source capture`, then `auto stored bink source` and `bink bridge applied`. On close it should show `reset bink bridge cycle ... restored_dummy=true`. If return still cannot replay, it should at least remain static instead of black.
+
+## 2026-06-20 18:25 CST - Return Fallback Verified Static
+
+### Completed
+
+- User validated the latest deployed build.
+- Confirmed first-cycle title playback and gameplay FPS behavior remain acceptable.
+- Confirmed the return-to-title black background regression is fixed: when replay cannot start, the title falls back to the static dummy background.
+
+### Modified Files
+
+- `F:\GoldenAge\fromsoftware-rs\_Project\dynamic-title-bg\TASK_STATUS.md`
+
+### Current Judgment
+
+The safe fallback behavior is now correct. The remaining missing feature is true replay after returning from gameplay to the title. Current logs strongly suggest the initial `CSMovieImp+0x38` path is not available after returning to title because the global `CSMovieImp` pointer remains null. Reusing the old descriptor is not enough; a valid movie playback/update owner is required to generate new Bink RGB frames.
+
+### Unresolved
+
+- Need a new runtime signal or owner for return-to-title playback if dynamic replay is required.
+- Possible directions:
+  - find where ER rebuilds/tears down `CSMovieImp` around return-to-title;
+  - hook the engine flag getter pattern from `fs-title-skip-master` to log title-state flags, then use a later/more precise title-ready signal;
+  - avoid native MovieImp for replay and build a custom Bink update path, which is more complex.
+
+### Next Step
+
+If pursuing true replay after return-to-title, add a narrow engine-flag getter probe based on `fs-title-skip-master` only for logging. Use it to identify which flag transitions happen during gameplay -> title return, then correlate that with `CSMovieImp` global availability and title descriptor creation.
+
+## 2026-06-20 18:31 CST - Engine Flag Driven Re-arm Test Build
+
+### Completed
+
+- Re-read project status and plan files before editing.
+- Added a plan for engine-flag-driven return re-arm based on `fs-title-skip-master`.
+- Implemented a read-only engine flag getter hook:
+  - scans `eldenring.exe` for the `fs-title-skip-master` AOB shape `48 0F BE 01 48 8D 0D ?? ?? ?? ?? 48 FF 24 C1`;
+  - installs an `ilhook` closure on the located getter;
+  - calls the original getter normally and never changes its return value.
+- Added sparse logging for title-related flag queries (`flag` values `1..6`).
+- Added re-arm requests from engine flag activity:
+  - if saved MovieImp trigger settings exist;
+  - if no MovieImp trigger is already running;
+  - if `world_player` is false;
+  - then start the existing MovieImp retry path with reason `engine flag title flow`.
+- Kept Bink source capture gated behind successful MovieImp setup, so an early/false flag cannot bridge random textures into the title descriptor.
+- Added config key `movie_imp_rearm_on_engine_flag` / `engine_flag_rearm`.
+- Updated example ini with the key defaulting to `false`.
+- Enabled the key in deployed ER ini for testing:
+  - `movie_imp_rearm_on_engine_flag=true`
+- Ran `cargo fmt`.
+- Built successfully with `cargo build --release --offline`.
+- Deployed rebuilt DLL to:
+  - `F:\GoldenAge\dll\dynamic_title\dynamic_title_bg.dll`
+- Backed up previous deployed files with suffix:
+  - `.before_engine_flag_rearm_20260620_183047`
+- Cleared deployed ER log for the next validation run.
+
+### Modified Files
+
+- `F:\GoldenAge\fromsoftware-rs\_Project\dynamic-title-bg\PLANS.md`
+- `F:\GoldenAge\fromsoftware-rs\_Project\dynamic-title-bg\TASK_STATUS.md`
+- `F:\GoldenAge\fromsoftware-rs\_Project\dynamic-title-bg\dynamic-title-bg.example.ini`
+- `F:\GoldenAge\fromsoftware-rs\_Project\dynamic-title-bg\src\lib.rs`
+- `F:\GoldenAge\fromsoftware-rs\_Project\dynamic-title-bg\src\bink_probe.rs`
+- `F:\GoldenAge\dll\dynamic_title\dynamic-title-bg.ini`
+- `F:\GoldenAge\dll\dynamic_title\dynamic_title_bg.dll`
+
+### Current Judgment
+
+This test checks whether title-related engine flag queries happen at a better time than the previous `title_ready()` heuristic. If the flag fires after the title systems are actually ready, the existing MovieImp retry path may be able to restart BK2 on return. If the log still shows `CSMovieImp` global as null after engine flag re-arm requests, then the return-to-title path likely does not recreate the same MovieImp owner at all.
+
+### Unresolved
+
+- Need validation run.
+- Need to confirm whether the AOB hook installs cleanly in the user's current ER executable.
+- Need to observe whether `engine flag rearm: title flag call` appears during initial title and return-to-title.
+- Need to observe whether an engine-flag-triggered retry ever reaches non-null `CSMovieImp` after returning to title.
+
+### Next Step
+
+Test ER again: main menu -> enter gameplay -> quit back to main menu. Important log lines are `engine flag rearm: hook installed`, `engine flag rearm: title flag call`, `engine flag rearm: request`, and whether a later `movie imp trigger: CSMovieImp=...` appears after returning to title.
+
+## 2026-06-20 18:36 CST - Rolled Back Engine Flag Test Deployment
+
+### Completed
+
+- User reported the engine-flag re-arm test build crashes when entering gameplay.
+- Stopped pursuing the engine-flag hook route for now.
+- Restored the deployed DLL from the pre-engine-flag backup:
+  - `F:\GoldenAge\dll\dynamic_title\dynamic_title_bg.dll.before_engine_flag_rearm_20260620_183105`
+  - restored to `F:\GoldenAge\dll\dynamic_title\dynamic_title_bg.dll`
+- Restored the deployed ini from the same backup, then explicitly set:
+  - `movie_imp_rearm_on_engine_flag=false`
+- Cleared the deployed log.
+
+### Modified Files
+
+- `F:\GoldenAge\dll\dynamic_title\dynamic_title_bg.dll`
+- `F:\GoldenAge\dll\dynamic_title\dynamic-title-bg.ini`
+- `F:\GoldenAge\fromsoftware-rs\_Project\dynamic-title-bg\TASK_STATUS.md`
+
+### Current Judgment
+
+The stable deployed target is now the verified fallback behavior: first title entry plays BK2 at native 30 fps, entering gameplay restores normal FPS after MovieIns close, and returning to title falls back to a static dummy/video image instead of black screen. The engine flag getter hook is unsafe in the current form and should not be enabled in deployment.
+
+### Unresolved
+
+- True replay after returning from gameplay to title remains unresolved.
+- The engine-flag hook path caused gameplay-entry crash and is paused.
+
+### Next Step
+
+Keep this stable behavior as the current release baseline unless the user explicitly resumes experiments. If experiments resume later, avoid enabling the engine flag hook in normal builds; use a separate probe-only branch or safer static analysis first.
+
+## 2026-06-20 18:43 CST - Freeze Last Video Frame Fallback
+
+### Completed
+
+- User clarified the desired return-to-title fallback is a static video frame, not the original dummy static background.
+- Re-read `TASK_STATUS.md`, `PLANS.md`, current source, and deployed ini before editing.
+- Added the freeze-last-video-frame plan to `PLANS.md` before changing code.
+- Changed `dx12_title_texture::reset_bink_bridge_cycle()` behavior:
+  - disables further Bink source capture after MovieIns is closed;
+  - resets match/callback counters;
+  - keeps the stored Bink RGB source alive;
+  - does not restore the original `MENU_DummyMovie` dummy descriptor.
+- Removed the now-unused dummy restore storage/function code from `dx12_title_texture.rs`.
+- Kept `enable_bink_bridge_source_capture()` clearing the old source only when MovieImp setup succeeds, so a genuine future replay can still capture a fresh Bink RGB source.
+- Ran `cargo fmt`.
+- Built successfully with `cargo build --release --offline` and no warnings.
+- Deployed rebuilt DLL to:
+  - `F:\GoldenAge\dll\dynamic_title\dynamic_title_bg.dll`
+- Ensured deployed ini has:
+  - `movie_imp_rearm_on_engine_flag=false`
+- Backed up previous deployed files with suffix:
+  - `.before_freeze_video_frame_20260620_184304`
+- Cleared deployed log.
+
+### Modified Files
+
+- `F:\GoldenAge\fromsoftware-rs\_Project\dynamic-title-bg\PLANS.md`
+- `F:\GoldenAge\fromsoftware-rs\_Project\dynamic-title-bg\TASK_STATUS.md`
+- `F:\GoldenAge\fromsoftware-rs\_Project\dynamic-title-bg\src\dx12_title_texture.rs`
+- `F:\GoldenAge\dll\dynamic_title\dynamic_title_bg.dll`
+- `F:\GoldenAge\dll\dynamic_title\dynamic-title-bg.ini`
+
+### Current Judgment
+
+The intended stable baseline is now: first title visit plays BK2 dynamically; gameplay closes MovieIns to restore FPS; return to title keeps the last bridged BK2/video frame as a static image. Source capture is disabled after close so unrelated post-return `DXGI_FORMAT(28)` resources should not overwrite the frozen video frame.
+
+### Unresolved
+
+- Needs validation that return-to-title now shows the static video frame instead of the original dummy static background.
+- True dynamic replay after returning to title remains unresolved and is not part of this baseline.
+
+### Next Step
+
+Test ER once: first title -> gameplay -> return title. Expected fallback is the final/last video frame frozen in the title background. If it instead shows dummy or black, inspect the fresh log with `log_enabled=true` for `reset bink bridge cycle ... froze_video_source=`.
+
+## 2026-06-20 18:52 CST - Prepared Stable GitHub Release Build
+
+### Completed
+
+- Removed the unsafe engine-flag re-arm experiment from source before publishing.
+- Kept the stable freeze-last-video-frame behavior:
+  - first title visit plays BK2 dynamically;
+  - gameplay closes MovieIns to restore FPS;
+  - return to title keeps the last bridged BK2/video frame as a static image.
+- Removed `movie_imp_rearm_on_engine_flag` from the example ini and deployed ini.
+- Ran `cargo fmt`.
+- Built successfully with `cargo build --release --offline`.
+- Deployed the rebuilt stable DLL to:
+  - `F:\GoldenAge\dll\dynamic_title\dynamic_title_bg.dll`
+- Cleared deployed log.
+
+### Modified Files
+
+- `F:\GoldenAge\fromsoftware-rs\_Project\dynamic-title-bg\TASK_STATUS.md`
+- `F:\GoldenAge\fromsoftware-rs\_Project\dynamic-title-bg\dynamic-title-bg.example.ini`
+- `F:\GoldenAge\fromsoftware-rs\_Project\dynamic-title-bg\src\bink_probe.rs`
+- `F:\GoldenAge\fromsoftware-rs\_Project\dynamic-title-bg\src\dx12_title_texture.rs`
+- `F:\GoldenAge\fromsoftware-rs\_Project\dynamic-title-bg\src\lib.rs`
+- `F:\GoldenAge\dll\dynamic_title\dynamic_title_bg.dll`
+- `F:\GoldenAge\dll\dynamic_title\dynamic-title-bg.ini`
+
+### Current Judgment
+
+This is the correct GitHub/release baseline. It excludes the engine-flag hook that caused a crash and keeps the verified behavior plus the static video-frame fallback.
+
+### Unresolved
+
+- True dynamic replay after returning to title is still unresolved and intentionally not part of this release.
+
+### Next Step
+
+Commit and push the stable project update to GitHub, then provide release notes for the user.
