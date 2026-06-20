@@ -12,23 +12,11 @@ The verified title-menu target is:
 - `DXGI_FORMAT(98)`
 - title descriptor index `1`
 
-The verified BK2 RGB source is:
-
-- `1920x1080`
-- `DXGI_FORMAT(28)`
-- Bink source index `1`
-
 ## Build
 
 ```powershell
 cd F:\GoldenAge\fromsoftware-rs\_Project\dynamic-title-bg
 cargo build --release --offline
-```
-
-The DLL is written to:
-
-```text
-F:\GoldenAge\fromsoftware-rs\_Project\dynamic-title-bg\target\release\dynamic_title_bg.dll
 ```
 
 ## Deploy
