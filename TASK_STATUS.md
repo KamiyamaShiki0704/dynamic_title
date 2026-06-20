@@ -3579,3 +3579,33 @@ This is the correct GitHub/release baseline. It excludes the engine-flag hook th
 ### Next Step
 
 Commit and push the stable project update to GitHub, then provide release notes for the user.
+
+## 2026-06-20 18:58 CST - Stable Lifecycle Version Pushed To GitHub
+
+### Completed
+
+- Committed the stable title movie lifecycle update:
+  - commit `9527f65` / `Stabilize title movie playback lifecycle`
+- Pushed `main` to:
+  - `git@github.com:KamiyamaShiki0704/dynamic_title.git`
+- Included the BK2-to-MP4 helper under `_Tools/bk2-to-mp4`.
+- Verified before commit:
+  - no engine-flag hook code remained in source/example config;
+  - `cargo build --release --offline` completed successfully;
+  - `git diff --check` had no whitespace errors.
+
+### Modified Files
+
+- `F:\GoldenAge\fromsoftware-rs\_Project\dynamic-title-bg\TASK_STATUS.md`
+
+### Current Judgment
+
+GitHub now has the stable release baseline: initial title BK2 playback, gameplay FPS restoration after MovieIns close, and static video-frame fallback on return to title. The unsafe engine flag experiment is not included in source.
+
+### Unresolved
+
+- User still needs final release packaging/upload if desired.
+
+### Next Step
+
+Provide release notes for the user to paste into GitHub Releases.
