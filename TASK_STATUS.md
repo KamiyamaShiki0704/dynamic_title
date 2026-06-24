@@ -3736,3 +3736,32 @@ This is the best current stable lifecycle model: stop the title movie's Bink res
 ### Next Step
 
 If further testing remains clean, commit and push this lifecycle fix to GitHub and update the release notes.
+
+## 2026-06-25 02:12 CST - GitHub Push: Title Movie Lifecycle Stop
+
+### Completed
+
+- Committed the validated lifecycle fix:
+  - `669a6eb` / `Fix title movie lifecycle stop`
+- Pushed `main` to:
+  - `git@github.com:KamiyamaShiki0704/dynamic_title.git`
+- Verified before push:
+  - `cargo build --release --offline` passed;
+  - `git diff --check` had no whitespace errors, only line-ending warnings.
+
+### Modified Files
+
+- `F:\GoldenAge\fromsoftware-rs\_Project\dynamic-title-bg\TASK_STATUS.md`
+
+### Current Judgment
+
+GitHub now contains the validated lifecycle fix that stops the native title BK2 on gameplay entry without clearing MovieIns state-machine fields. The current release baseline remains: first title visit plays BK2, gameplay restores normal FPS, return-to-title keeps a static last video frame, and later in-game BK2 playback is not replaced by the title movie.
+
+### Unresolved
+
+- Continue optional soak testing around rare in-game BK2 skip/end cases.
+- True dynamic replay after returning to title remains intentionally disabled.
+
+### Next Step
+
+If desired, prepare updated release notes for a bugfix release.
