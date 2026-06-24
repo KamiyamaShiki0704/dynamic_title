@@ -32,6 +32,10 @@ static BINK_OPEN_CALL_COUNT: AtomicUsize = AtomicUsize::new(0);
 static MOVIE_WRAPPER_HOOK_INSTALLED: AtomicUsize = AtomicUsize::new(0);
 static MOVIE_WRAPPER_CALL_COUNT: AtomicUsize = AtomicUsize::new(0);
 static MOVIE_INS_HOOK_INSTALLED: AtomicUsize = AtomicUsize::new(0);
+static MOVIE_INS_PROBE_VERBOSE: AtomicUsize = AtomicUsize::new(0);
+static MOVIE_INS_HANDOFF_ENABLED: AtomicUsize = AtomicUsize::new(0);
+static MOVIE_SETUP_HOOK_INSTALLED: AtomicUsize = AtomicUsize::new(0);
+static MOVIE_SETUP_CALL_COUNT: AtomicUsize = AtomicUsize::new(0);
 static MOVIE_INS_CALL_COUNT: AtomicUsize = AtomicUsize::new(0);
 static MOVIE_IMP_TRIGGER_STARTED: AtomicUsize = AtomicUsize::new(0);
 static MOVIE_STEP_HOOK_INSTALLED: AtomicUsize = AtomicUsize::new(0);
@@ -49,6 +53,7 @@ static MOVIE_DRAW_SUBMIT_HOOK_INSTALLED: AtomicUsize = AtomicUsize::new(0);
 static MOVIE_DRAW_SUBMIT_CALL_COUNT: AtomicUsize = AtomicUsize::new(0);
 static MOVIE_STOP_MONITOR_ENABLED: AtomicUsize = AtomicUsize::new(1);
 static MOVIE_STOP_MONITOR_STARTED: AtomicUsize = AtomicUsize::new(0);
+static TITLE_NATIVE_FINISH_MONITOR_STARTED: AtomicUsize = AtomicUsize::new(0);
 static MOVIE_STOP_MONITOR_INTERVAL_MS: AtomicUsize = AtomicUsize::new(100);
 static MOVIE_STOP_MONITOR_GRACE_MS: AtomicUsize = AtomicUsize::new(2000);
 static STAFFROLL_STATUS_SLOT_HOOK_INSTALLED: AtomicUsize = AtomicUsize::new(0);
@@ -68,11 +73,15 @@ static STAFFROLL_SCENE_B_CALL_COUNT: AtomicUsize = AtomicUsize::new(0);
 static STAFFROLL_CTOR_CALL_COUNT: AtomicUsize = AtomicUsize::new(0);
 static BINK_TEXTURE_OPEN_HOOK_INSTALLED: AtomicUsize = AtomicUsize::new(0);
 static BINK_TEXTURE_OPEN_CALL_COUNT: AtomicUsize = AtomicUsize::new(0);
+static BINK_TEXTURE_CLOSE_HOOK_INSTALLED: AtomicUsize = AtomicUsize::new(0);
+static BINK_TEXTURE_CLOSE_CALL_COUNT: AtomicUsize = AtomicUsize::new(0);
 static BINK_TEXTURE_FORCE_PRESENT_FLAG: OnceLock<bool> = OnceLock::new();
 static BINK_TEXTURE_FORCE_PRESENT_OPTION: OnceLock<bool> = OnceLock::new();
 static BINK_TEXTURE_COPY_PRESENT_OPTION_AFTER_OPEN: OnceLock<bool> = OnceLock::new();
 static MOVIE_INS_LAYOUT: OnceLock<MovieInsLayout> = OnceLock::new();
 static LAST_MOVIE_PARENT: AtomicUsize = AtomicUsize::new(0);
+static LAST_OBSERVED_MOVIE_PARENT: AtomicUsize = AtomicUsize::new(0);
+static LAST_OBSERVED_MOVIE_INNER: AtomicUsize = AtomicUsize::new(0);
 static LAST_MOVIE_RENDER_RESULT: AtomicUsize = AtomicUsize::new(0);
 static LAST_MOVIE_DRAW_ARG: AtomicUsize = AtomicUsize::new(0);
 static LAST_MOVIE_INNER: AtomicUsize = AtomicUsize::new(0);
@@ -295,9 +304,15 @@ pub(crate) fn install_bink_texture_open_probe(
     });
 }
 
-pub(crate) fn install_movie_ins_probe(log_path: Option<PathBuf>) {
+pub(crate) fn install_movie_ins_probe(log_path: Option<PathBuf>, verbose: bool, handoff: bool) {
     if let Some(path) = log_path {
         let _ = LOG_PATH.set(path);
+    }
+    if verbose {
+        MOVIE_INS_PROBE_VERBOSE.store(1, Ordering::Release);
+    }
+    if handoff {
+        MOVIE_INS_HANDOFF_ENABLED.store(1, Ordering::Release);
     }
     if MOVIE_INS_HOOK_INSTALLED.load(Ordering::Acquire) != 0 {
         return;
@@ -318,8 +333,10 @@ pub(crate) fn install_movie_ins_probe(log_path: Option<PathBuf>) {
         let _ = MOVIE_INS_LAYOUT.set(layout);
         let addr = base + rva;
         append_log(&format!(
-            "movie ins probe: module=\"{module_name}\" layout={} hooking main.exe+0x{rva:X} addr=0x{addr:X}",
-            layout.name
+            "movie ins probe: module=\"{module_name}\" layout={} hooking main.exe+0x{rva:X} addr=0x{addr:X} verbose={} handoff={}",
+            layout.name,
+            MOVIE_INS_PROBE_VERBOSE.load(Ordering::Acquire) != 0,
+            MOVIE_INS_HANDOFF_ENABLED.load(Ordering::Acquire) != 0
         ));
         match unsafe {
             hook_closure_retn(
@@ -336,6 +353,51 @@ pub(crate) fn install_movie_ins_probe(log_path: Option<PathBuf>) {
             }
             Err(err) => {
                 append_log(&format!("movie ins probe: hook failed: {err:?}"));
+            }
+        }
+    });
+}
+
+pub(crate) fn install_movie_setup_handoff_hook(log_path: Option<PathBuf>) {
+    if let Some(path) = log_path {
+        let _ = LOG_PATH.set(path);
+    }
+    if MOVIE_SETUP_HOOK_INSTALLED.load(Ordering::Acquire) != 0 {
+        return;
+    }
+
+    std::thread::spawn(|| {
+        let Ok(exe) = (unsafe { GetModuleHandleA(None) }) else {
+            append_log("movie setup handoff: main module unavailable");
+            return;
+        };
+        let module_name = main_module_name(exe);
+        if !module_name.contains("eldenring.exe") {
+            append_log(&format!(
+                "movie setup handoff: skipped unsupported module=\"{module_name}\""
+            ));
+            return;
+        }
+        let base = exe.0 as usize;
+        let addr = base + ER_MOVIE_INS_SETUP_RVA;
+        append_log(&format!(
+            "movie setup handoff: hooking eldenring.exe+0x{ER_MOVIE_INS_SETUP_RVA:X} addr=0x{addr:X}"
+        ));
+        match unsafe {
+            hook_closure_retn(
+                addr,
+                |registers, original| movie_setup_handoff_hook(registers, original),
+                CallbackOption::None,
+                HookFlags::empty(),
+            )
+        } {
+            Ok(hook) => {
+                let _ = Box::leak(Box::new(hook));
+                MOVIE_SETUP_HOOK_INSTALLED.store(1, Ordering::Release);
+                append_log("movie setup handoff: hook installed");
+            }
+            Err(err) => {
+                append_log(&format!("movie setup handoff: hook failed: {err:?}"));
             }
         }
     });
@@ -1012,6 +1074,7 @@ type MovieStateStepFn = unsafe extern "system" fn(usize, usize, usize, usize) ->
 type MovieTickFn = unsafe extern "system" fn(usize, usize, usize, usize) -> usize;
 type MovieRenderFn = unsafe extern "system" fn(usize, usize, usize, usize) -> usize;
 type MovieDrawSubmitFn = unsafe extern "system" fn(usize, usize, usize, usize) -> usize;
+type BinkTextureCloseFn = unsafe extern "system" fn(usize) -> usize;
 type Probe4Fn = unsafe extern "system" fn(usize, usize, usize, usize) -> usize;
 
 #[derive(Clone, Copy)]
@@ -1212,21 +1275,301 @@ fn movie_ins_init_hook(registers: *mut Registers, original: usize) -> usize {
     let rdx = registers.rdx as usize;
     let r8 = registers.r8 as usize;
     let r9 = registers.r9 as usize;
+    let verbose = MOVIE_INS_PROBE_VERBOSE.load(Ordering::Acquire) != 0;
 
-    append_log(&format!(
-        "movie ins probe: init call #{count} caller=0x{caller:X} caller_rva={} rcx=0x{rcx:X} rdx=0x{rdx:X} r8=0x{r8:X} r9=0x{r9:X}",
-        caller_rva(caller)
-    ));
-    log_movie_ins(count, rcx, "before");
+    if verbose {
+        append_log(&format!(
+            "movie ins probe: init call #{count} caller=0x{caller:X} caller_rva={} rcx=0x{rcx:X} rdx=0x{rdx:X} r8=0x{r8:X} r9=0x{r9:X}",
+            caller_rva(caller)
+        ));
+        log_movie_ins(count, rcx, "before");
+    }
+    request_title_movie_finish_before_native_handoff(count, rcx);
 
     let original: MovieInsInitFn = unsafe { std::mem::transmute(original) };
     let result = unsafe { original(rcx, rdx, r8, r9) };
 
-    append_log(&format!(
-        "movie ins probe: init return #{count} result=0x{result:X}"
-    ));
-    log_movie_ins(count, rcx, "after");
+    if verbose {
+        append_log(&format!(
+            "movie ins probe: init return #{count} result=0x{result:X}"
+        ));
+        log_movie_ins(count, rcx, "after");
+        observe_movie_after_init(count, rcx);
+    }
     result
+}
+
+fn observe_movie_after_init(count: usize, movie_ins: usize) {
+    if movie_ins == 0 || !is_readable_memory(movie_ins, 0x140) {
+        return;
+    }
+
+    let layout = *MOVIE_INS_LAYOUT.get().unwrap_or(&ER_MOVIE_INS_LAYOUT);
+    let inner = unsafe { read_usize(movie_ins + layout.bink_texture_offset) };
+    if inner == 0 || !is_readable_memory(inner, 0x58) {
+        return;
+    }
+
+    LAST_OBSERVED_MOVIE_PARENT.store(movie_ins, Ordering::Release);
+    LAST_OBSERVED_MOVIE_INNER.store(inner, Ordering::Release);
+    let path_ptr = movie_ins + layout.path_offset;
+    let (_, _, _, fd4_text, _) = unsafe { read_fd4_wstring_preview(path_ptr, 260) };
+    append_log(&format!(
+        "movie lifecycle probe: observed movie init #{count} movie_ins=0x{movie_ins:X} inner=0x{inner:X} path=\"{fd4_text}\""
+    ));
+    install_bink_texture_close_probe_from_object(inner);
+}
+
+fn install_bink_texture_close_probe_from_object(inner: usize) {
+    if BINK_TEXTURE_CLOSE_HOOK_INSTALLED.load(Ordering::Acquire) != 0
+        || inner == 0
+        || !is_readable_memory(inner, 0x58)
+    {
+        return;
+    }
+
+    let vtable = unsafe { read_usize(inner) };
+    if vtable == 0 || !is_readable_memory(vtable + 0x10, 8) {
+        append_log(&format!(
+            "bink texture close probe: skipped unreadable vtable inner=0x{inner:X} vtable=0x{vtable:X}"
+        ));
+        return;
+    }
+
+    let close_addr = unsafe { read_usize(vtable + 0x10) };
+    if close_addr == 0 || !is_readable_memory(close_addr, 1) {
+        append_log(&format!(
+            "bink texture close probe: skipped unreadable close slot inner=0x{inner:X} vtable=0x{vtable:X} close=0x{close_addr:X}"
+        ));
+        return;
+    }
+
+    append_log(&format!(
+        "bink texture close probe: hooking close=0x{close_addr:X} close_rva={} from inner=0x{inner:X} vtable=0x{vtable:X}",
+        caller_rva(close_addr)
+    ));
+    match unsafe {
+        hook_closure_retn(
+            close_addr,
+            |registers, original| bink_texture_close_hook(registers, original),
+            CallbackOption::None,
+            HookFlags::empty(),
+        )
+    } {
+        Ok(hook) => {
+            let _ = Box::leak(Box::new(hook));
+            BINK_TEXTURE_CLOSE_HOOK_INSTALLED.store(1, Ordering::Release);
+            append_log("bink texture close probe: hook installed");
+        }
+        Err(err) => {
+            append_log(&format!("bink texture close probe: hook failed: {err:?}"));
+        }
+    }
+}
+
+fn request_title_movie_native_finish(movie_ins: usize, reason: &'static str) {
+    if movie_ins == 0 || !is_readable_memory(movie_ins, 0x140) {
+        append_log(&format!(
+            "movie imp native finish: cannot request unreadable movie_ins=0x{movie_ins:X} reason={reason}"
+        ));
+        return;
+    }
+
+    let inner = unsafe { read_usize(movie_ins + ER_MOVIE_INS_LAYOUT.bink_texture_offset) };
+    let active = unsafe { read_u8(movie_ins + 0x130) };
+    let state_a = unsafe { read_u32(movie_ins + 0x40) };
+    let state_b = unsafe { read_u32(movie_ins + 0x44) };
+    let repeat = unsafe { read_u32(movie_ins + 0x48) };
+    let cleanup_countdown = unsafe { read_u8(movie_ins + 0x133) };
+    append_log(&format!(
+        "movie imp native finish: request movie_ins=0x{movie_ins:X} inner[+B8]=0x{inner:X} reason={reason} active=0x{active:02X} state=0x{state_a:X}/0x{state_b:X}/0x{repeat:X} countdown[+133]=0x{cleanup_countdown:02X}"
+    ));
+
+    crate::dx12_title_texture::freeze_bink_bridge_after_title_stop(reason);
+
+    if inner == 0 || active == 0 {
+        LAST_MOVIE_PARENT.store(0, Ordering::Release);
+        reset_movie_imp_cycle_after_title_stop(reason);
+        append_log(&format!(
+            "movie imp native finish: already inactive movie_ins=0x{movie_ins:X} inner=0x{inner:X} active=0x{active:02X}"
+        ));
+        return;
+    }
+
+    unsafe {
+        std::ptr::write_volatile((movie_ins + 0x40) as *mut u32, 7);
+        std::ptr::write_volatile((movie_ins + 0x44) as *mut u32, 7);
+        std::ptr::write_volatile((movie_ins + 0x133) as *mut u8, 1);
+    }
+    start_title_native_finish_monitor(movie_ins, reason);
+}
+
+fn start_title_native_finish_monitor(movie_ins: usize, reason: &'static str) {
+    if TITLE_NATIVE_FINISH_MONITOR_STARTED.swap(1, Ordering::AcqRel) != 0 {
+        return;
+    }
+    std::thread::spawn(move || {
+        append_log(&format!(
+            "movie imp native finish: monitor started movie_ins=0x{movie_ins:X} reason={reason}"
+        ));
+        for tick in 0..500usize {
+            std::thread::sleep(Duration::from_millis(10));
+            if !is_readable_memory(movie_ins, 0x140) {
+                LAST_MOVIE_PARENT.store(0, Ordering::Release);
+                reset_movie_imp_cycle_after_title_stop(reason);
+                TITLE_NATIVE_FINISH_MONITOR_STARTED.store(0, Ordering::Release);
+                append_log(&format!(
+                    "movie imp native finish: monitor released unreadable movie_ins=0x{movie_ins:X}"
+                ));
+                return;
+            }
+
+            let inner = unsafe { read_usize(movie_ins + ER_MOVIE_INS_LAYOUT.bink_texture_offset) };
+            let active = unsafe { read_u8(movie_ins + 0x130) };
+            let state_a = unsafe { read_u32(movie_ins + 0x40) };
+            let state_b = unsafe { read_u32(movie_ins + 0x44) };
+            let cleanup_countdown = unsafe { read_u8(movie_ins + 0x133) };
+            if inner == 0 || active == 0 {
+                LAST_MOVIE_PARENT.store(0, Ordering::Release);
+                reset_movie_imp_cycle_after_title_stop(reason);
+                TITLE_NATIVE_FINISH_MONITOR_STARTED.store(0, Ordering::Release);
+                append_log(&format!(
+                    "movie imp native finish: completed movie_ins=0x{movie_ins:X} tick={tick} inner[+B8]=0x{inner:X} active=0x{active:02X} state=0x{state_a:X}/0x{state_b:X} countdown[+133]=0x{cleanup_countdown:02X}"
+                ));
+                return;
+            }
+
+            if tick == 50 || tick == 200 {
+                append_log(&format!(
+                    "movie imp native finish: waiting movie_ins=0x{movie_ins:X} tick={tick} inner[+B8]=0x{inner:X} active=0x{active:02X} state=0x{state_a:X}/0x{state_b:X} countdown[+133]=0x{cleanup_countdown:02X}"
+                ));
+            }
+        }
+        TITLE_NATIVE_FINISH_MONITOR_STARTED.store(0, Ordering::Release);
+        append_log(&format!(
+            "movie imp native finish: timed out movie_ins=0x{movie_ins:X} reason={reason}"
+        ));
+    });
+}
+
+fn movie_setup_handoff_hook(registers: *mut Registers, original: usize) -> usize {
+    let registers = unsafe { &*registers };
+    let count = MOVIE_SETUP_CALL_COUNT.fetch_add(1, Ordering::Relaxed) + 1;
+    let movie_ins = registers.rcx as usize;
+    let setup_flag = registers.rdx as u8;
+    let path_ptr = registers.r8 as usize;
+    let volume = f32::from_bits(registers.xmm3 as u32);
+    let present = unsafe { registers.get_stack(5) as u8 };
+    let unknown = unsafe { registers.get_stack(6) as u8 };
+    let option = unsafe { registers.get_stack(7) as u32 };
+    let path_text = unsafe { read_utf16_preview(path_ptr, 260) };
+    if count <= 8 {
+        append_log(&format!(
+            "movie setup handoff: setup call #{count} movie_ins=0x{movie_ins:X} path=\"{path_text}\" setup_flag={setup_flag} volume={volume:.3} present={present} unknown={unknown} option=0x{option:X}"
+        ));
+    }
+
+    maybe_finish_title_movie_before_setup(count, movie_ins, &path_text);
+
+    let original: ErMovieInsSetupFn = unsafe { std::mem::transmute(original) };
+    unsafe {
+        original(
+            movie_ins as *mut c_void,
+            setup_flag,
+            path_ptr as *const u16,
+            volume,
+            present,
+            unknown,
+            option,
+        )
+    }
+    .into()
+}
+
+fn maybe_finish_title_movie_before_setup(count: usize, movie_ins: usize, path_text: &str) {
+    let tracked = LAST_MOVIE_PARENT.load(Ordering::Acquire);
+    if tracked == 0 || movie_ins != tracked || is_probable_title_movie_marker(path_text) {
+        return;
+    }
+    if !is_readable_memory(movie_ins, 0x140) {
+        append_log(&format!(
+            "movie setup handoff: tracked movie unreadable setup#{count} movie_ins=0x{movie_ins:X} path=\"{path_text}\""
+        ));
+        return;
+    }
+
+    let inner = unsafe { read_usize(movie_ins + ER_MOVIE_INS_LAYOUT.bink_texture_offset) };
+    let active = unsafe { read_u8(movie_ins + 0x130) };
+    let state_a = unsafe { read_u32(movie_ins + 0x40) };
+    let state_b = unsafe { read_u32(movie_ins + 0x44) };
+    append_log(&format!(
+        "movie setup handoff: setup#{count} path=\"{path_text}\" movie_ins=0x{movie_ins:X} inner[+B8]=0x{inner:X} active=0x{active:02X} state=0x{state_a:X}/0x{state_b:X}"
+    ));
+    request_title_movie_native_finish(movie_ins, "native movie setup handoff");
+    wait_for_title_movie_native_finish(movie_ins, "native movie setup handoff");
+}
+
+fn wait_for_title_movie_native_finish(movie_ins: usize, reason: &'static str) {
+    for tick in 0..50usize {
+        if !is_readable_memory(movie_ins, 0x140) {
+            append_log(&format!(
+                "movie imp native finish: setup wait unreadable movie_ins=0x{movie_ins:X} reason={reason}"
+            ));
+            return;
+        }
+        let inner = unsafe { read_usize(movie_ins + ER_MOVIE_INS_LAYOUT.bink_texture_offset) };
+        let active = unsafe { read_u8(movie_ins + 0x130) };
+        if inner == 0 || active == 0 {
+            LAST_MOVIE_PARENT.store(0, Ordering::Release);
+            reset_movie_imp_cycle_after_title_stop(reason);
+            append_log(&format!(
+                "movie imp native finish: setup wait completed movie_ins=0x{movie_ins:X} tick={tick} inner[+B8]=0x{inner:X} active=0x{active:02X} reason={reason}"
+            ));
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+
+    if is_readable_memory(movie_ins, 0x140) {
+        let inner = unsafe { read_usize(movie_ins + ER_MOVIE_INS_LAYOUT.bink_texture_offset) };
+        let active = unsafe { read_u8(movie_ins + 0x130) };
+        let state_a = unsafe { read_u32(movie_ins + 0x40) };
+        let state_b = unsafe { read_u32(movie_ins + 0x44) };
+        append_log(&format!(
+            "movie imp native finish: setup wait timed out movie_ins=0x{movie_ins:X} inner[+B8]=0x{inner:X} active=0x{active:02X} state=0x{state_a:X}/0x{state_b:X} reason={reason}"
+        ));
+    }
+}
+
+fn request_title_movie_finish_before_native_handoff(count: usize, movie_ins: usize) {
+    if MOVIE_INS_HANDOFF_ENABLED.load(Ordering::Acquire) == 0 {
+        return;
+    }
+    let tracked = LAST_MOVIE_PARENT.load(Ordering::Acquire);
+    if tracked == 0 || movie_ins != tracked || !is_readable_memory(movie_ins, 0x140) {
+        return;
+    }
+
+    let layout = *MOVIE_INS_LAYOUT.get().unwrap_or(&ER_MOVIE_INS_LAYOUT);
+    let path_ptr = movie_ins + layout.path_offset;
+    let title_raw = unsafe { read_ascii_preview(path_ptr, 128) };
+    let title_utf16 = unsafe { read_utf16_preview(path_ptr, 128) };
+    let (_, _, _, fd4_text, _) = unsafe { read_fd4_wstring_preview(path_ptr, 260) };
+    if is_probable_title_movie_marker(&title_raw)
+        || is_probable_title_movie_marker(&title_utf16)
+        || is_probable_title_movie_marker(&fd4_text)
+    {
+        return;
+    }
+
+    let inner = unsafe { read_usize(movie_ins + ER_MOVIE_INS_LAYOUT.bink_texture_offset) };
+    let active_before = unsafe { read_u8(movie_ins + 0x130) };
+    let state_before = unsafe { read_u32(movie_ins + 0x40) };
+    let state2_before = unsafe { read_u32(movie_ins + 0x44) };
+    append_log(&format!(
+        "movie imp native finish: native movie init handoff #{count} movie_ins=0x{movie_ins:X} inner[+B8]=0x{inner:X} path=\"{fd4_text}\" active=0x{active_before:02X} state=0x{state_before:X}/0x{state2_before:X}"
+    ));
+    request_title_movie_native_finish(movie_ins, "native movie init handoff");
 }
 
 fn movie_step_hook(registers: *mut Registers, original: usize) -> usize {
@@ -1470,13 +1813,21 @@ fn start_movie_imp_stop_monitor(movie_ins: usize) {
             "movie imp stop monitor: watching after grace {}",
             grace_snapshot.summary()
         ));
-        let mut armed = grace_snapshot.title_ready();
-        if armed {
-            append_log("movie imp stop monitor: armed from grace snapshot");
-        }
 
+        let mut world_player_ticks = 0usize;
+        let world_player_required_ticks = (2000
+            / MOVIE_STOP_MONITOR_INTERVAL_MS
+                .load(Ordering::Acquire)
+                .max(1))
+        .max(1);
         for _ in 0..18000 {
             std::thread::sleep(interval);
+            if LAST_MOVIE_PARENT.load(Ordering::Acquire) != movie_ins {
+                append_log(&format!(
+                    "movie imp stop monitor: target released movie_ins=0x{movie_ins:X}"
+                ));
+                return;
+            }
             let snapshot = TitleGateSnapshot::capture();
             if snapshot != last_snapshot {
                 append_log(&format!(
@@ -1487,24 +1838,18 @@ fn start_movie_imp_stop_monitor(movie_ins: usize) {
             }
 
             if snapshot.world_player {
-                stop_title_movie_ins(movie_ins, "world player active");
-                return;
-            }
-
-            if !armed {
-                if snapshot.title_ready() {
-                    armed = true;
+                world_player_ticks += 1;
+                if world_player_ticks == 1 {
                     append_log(&format!(
-                        "movie imp stop monitor: armed from stable title {}",
-                        snapshot.summary()
+                        "movie imp stop monitor: world player detected, delaying cleanup ticks_required={world_player_required_ticks}"
                     ));
                 }
-                continue;
-            }
-
-            if snapshot.should_stop_after_title() {
-                stop_title_movie_ins(movie_ins, "left title menu gate");
-                return;
+                if world_player_ticks >= world_player_required_ticks {
+                    request_title_movie_native_finish(movie_ins, "world player stable");
+                    return;
+                }
+            } else {
+                world_player_ticks = 0;
             }
         }
 
@@ -1534,14 +1879,6 @@ impl TitleGateSnapshot {
             hud_default: hud_is_default(),
             world_player: world_player_active(),
         }
-    }
-
-    fn title_ready(&self) -> bool {
-        !self.ingame_flow && !self.loading && !self.hud_default && !self.world_player
-    }
-
-    fn should_stop_after_title(&self) -> bool {
-        self.ingame_flow || self.loading || self.hud_default || self.world_player
     }
 
     fn summary(&self) -> String {
@@ -1601,79 +1938,60 @@ fn task_group_active(index: CSTaskGroupIndex) -> bool {
         .unwrap_or(false)
 }
 
-fn stop_title_movie_ins(movie_ins: usize, reason: &str) {
-    if movie_ins == 0 || !is_readable_memory(movie_ins, 0x140) {
-        append_log(&format!(
-            "movie imp stop monitor: cannot stop unreadable movie_ins=0x{movie_ins:X} reason={reason}"
-        ));
-        return;
-    }
-
-    let inner = unsafe { read_usize(movie_ins + ER_MOVIE_INS_LAYOUT.bink_texture_offset) };
-    let active_before = unsafe { read_u8(movie_ins + 0x130) };
-    let state_before = unsafe { read_u32(movie_ins + 0x40) };
-    let state2_before = unsafe { read_u32(movie_ins + 0x44) };
-    append_log(&format!(
-        "movie imp stop monitor: stopping title movie_ins=0x{movie_ins:X} inner[+B8]=0x{inner:X} reason={reason} active=0x{active_before:02X} state=0x{state_before:X}/0x{state2_before:X}"
-    ));
-
-    let mut inner_closed = false;
-    if inner != 0 && is_readable_memory(inner, 0x58) {
-        let vtable = unsafe { read_usize(inner) };
-        if vtable != 0 && is_readable_memory(vtable + 0x10, 8) {
-            let close_fn = unsafe { read_usize(vtable + 0x10) };
-            type CloseFn = unsafe extern "system" fn(usize) -> usize;
-            let close: CloseFn = unsafe { std::mem::transmute(close_fn) };
-            let result = unsafe { close(inner) };
-            inner_closed = true;
-            append_log(&format!(
-                "movie imp stop monitor: title inner close returned 0x{result:X} close=0x{close_fn:X}"
-            ));
-        }
-    }
-
-    unsafe {
-        std::ptr::write_volatile(
-            (movie_ins + ER_MOVIE_INS_LAYOUT.bink_texture_offset) as *mut usize,
-            0,
-        );
-        std::ptr::write_volatile((movie_ins + 0x130) as *mut u8, 0);
-    }
-
-    let mut detached_imp_current = false;
-    if let Ok(exe) = unsafe { GetModuleHandleA(None) } {
-        let base = exe.0 as usize;
-        let global_addr = base + ER_CS_MOVIE_IMP_GLOBAL_RVA;
-        if is_readable_memory(global_addr, 8) {
-            let imp = unsafe { read_usize(global_addr) };
-            if imp != 0 && is_readable_memory(imp + 0x48, 8) {
-                let field_40 = unsafe { read_usize(imp + 0x40) };
-                if field_40 == movie_ins {
-                    unsafe {
-                        std::ptr::write_volatile((imp + 0x40) as *mut usize, 0);
-                    }
-                    detached_imp_current = true;
-                }
-            }
-        }
-    }
-
-    LAST_MOVIE_PARENT.store(0, Ordering::Release);
-    reset_movie_imp_cycle_after_title_stop(reason);
-    let active_after = unsafe { read_u8(movie_ins + 0x130) };
-    let state_after = unsafe { read_u32(movie_ins + 0x40) };
-    let state2_after = unsafe { read_u32(movie_ins + 0x44) };
-    append_log(&format!(
-        "movie imp stop monitor: stopped title movie_ins=0x{movie_ins:X} inner_closed={inner_closed} imp_current_detached={detached_imp_current} active {active_before:02X}->{active_after:02X} state 0x{state_before:X}/0x{state2_before:X}->0x{state_after:X}/0x{state2_after:X}"
-    ));
-}
-
 fn reset_movie_imp_cycle_after_title_stop(reason: &str) {
     MOVIE_STOP_MONITOR_STARTED.store(0, Ordering::Release);
     crate::dx12_title_texture::freeze_bink_bridge_after_title_stop(reason);
 }
 
 type MovieOpenWrapperFn = unsafe extern "system" fn(usize, usize, usize, usize) -> usize;
+
+fn bink_texture_close_hook(registers: *mut Registers, original: usize) -> usize {
+    let registers = unsafe { &*registers };
+    let count = BINK_TEXTURE_CLOSE_CALL_COUNT.fetch_add(1, Ordering::Relaxed) + 1;
+    let caller = unsafe { registers.get_stack(0) as usize };
+    let rcx = registers.rcx as usize;
+    let tracked_parent = LAST_OBSERVED_MOVIE_PARENT.load(Ordering::Acquire);
+    let tracked_inner = LAST_OBSERVED_MOVIE_INNER.load(Ordering::Acquire);
+    let matches_tracked = tracked_inner != 0 && rcx == tracked_inner;
+
+    append_log(&format!(
+        "bink texture close probe: call #{count} caller=0x{caller:X} caller_rva={} rcx=0x{rcx:X} tracked_parent=0x{tracked_parent:X} tracked_inner=0x{tracked_inner:X} matches_tracked={matches_tracked}",
+        caller_rva(caller)
+    ));
+    log_bink_texture_object_for_close(count, rcx, "before");
+
+    let original: BinkTextureCloseFn = unsafe { std::mem::transmute(original) };
+    let result = unsafe { original(rcx) };
+
+    append_log(&format!(
+        "bink texture close probe: return #{count} result=0x{result:X} matches_tracked={matches_tracked}"
+    ));
+    log_bink_texture_object_for_close(count, rcx, "after");
+    result
+}
+
+fn log_bink_texture_object_for_close(count: usize, ptr: usize, phase: &str) {
+    if ptr == 0 || !is_readable_memory(ptr, 0x58) {
+        append_log(&format!(
+            "bink texture close probe: object {phase} #{count} rcx=0x{ptr:X} unreadable"
+        ));
+        return;
+    }
+
+    let vtable = unsafe { read_usize(ptr) };
+    let field_08 = unsafe { read_usize(ptr + 0x08) };
+    let field_28 = unsafe { read_usize(ptr + 0x28) };
+    let bink = unsafe { read_usize(ptr + 0x40) };
+    let field_48 = unsafe { read_usize(ptr + 0x48) };
+    let flags_50 = unsafe { read_u8(ptr + 0x50) };
+    let flags_51 = unsafe { read_u8(ptr + 0x51) };
+    let flags_52 = unsafe { read_u8(ptr + 0x52) };
+    let flags_53 = unsafe { read_u8(ptr + 0x53) };
+    append_log(&format!(
+        "bink texture close probe: object {phase} #{count} rcx=0x{ptr:X} vtable={} [08]=0x{field_08:X} [28]=0x{field_28:X} bink[40]=0x{bink:X} [48]=0x{field_48:X} flags[50..53]={flags_50:02X},{flags_51:02X},{flags_52:02X},{flags_53:02X}",
+        caller_rva(vtable)
+    ));
+}
 
 fn bink_texture_open_hook(registers: *mut Registers, original: usize) -> usize {
     let registers = unsafe { &*registers };
@@ -2123,8 +2441,8 @@ fn log_movie_step(
     let movie_ins_vtable = unsafe { read_usize(ptr + 0x90) };
     let last_entry = unsafe { read_usize(ptr + 0x98) };
     let mut state_slots = String::new();
-    if state_table != 0 && is_readable_memory(state_table, 0x60) {
-        for state in 0..6usize {
+    if state_table != 0 && is_readable_memory(state_table, 0x80) {
+        for state in 0..8usize {
             let primary = unsafe { read_usize(state_table + state * 0x10) };
             let secondary = unsafe { read_usize(state_table + state * 0x10 + 0x08) };
             state_slots.push_str(&format!(
@@ -2271,6 +2589,9 @@ fn log_movie_ins(count: usize, ptr: usize, phase: &str) {
     let vtable = unsafe { read_usize(ptr) };
     let draw_arg = unsafe { read_usize(ptr + 0xA8) };
     let movie_obj = unsafe { read_usize(ptr + layout.bink_texture_offset) };
+    let movie_state_a = unsafe { read_u32(ptr + 0x40) };
+    let movie_state_b = unsafe { read_u32(ptr + 0x44) };
+    let movie_repeat = unsafe { read_u32(ptr + 0x48) };
     let volume = unsafe { read_f32(ptr + layout.volume_offset) };
     let present = unsafe { read_u8(ptr + layout.present_offset) };
     let option = unsafe { read_u32(ptr + layout.option_offset) };
@@ -2288,7 +2609,7 @@ fn log_movie_ins(count: usize, ptr: usize, phase: &str) {
         unsafe { read_fd4_wstring_preview(path_ptr, 260) };
 
     append_log(&format!(
-        "movie ins probe: {phase} #{count} layout={} vtable=0x{vtable:X} draw_arg[+A8]=0x{draw_arg:X} bink_texture[+{:X}]=0x{movie_obj:X} volume[+{:X}]={volume:.3} present[+{:X}]=0x{present:02X} option[+{:X}]=0x{option:X} state[+130..134]={state_130:04X},{state_131:02X},{state_132:02X},{state_133:02X},{state_134:02X} aux[+5D8]=0x{aux_5d8:X}",
+        "movie ins probe: {phase} #{count} layout={} vtable=0x{vtable:X} draw_arg[+A8]=0x{draw_arg:X} bink_texture[+{:X}]=0x{movie_obj:X} state[+40/+44/+48]=0x{movie_state_a:X}/0x{movie_state_b:X}/0x{movie_repeat:X} volume[+{:X}]={volume:.3} present[+{:X}]=0x{present:02X} option[+{:X}]=0x{option:X} state[+130..134]={state_130:04X},{state_131:02X},{state_132:02X},{state_133:02X},{state_134:02X} aux[+5D8]=0x{aux_5d8:X}",
         layout.name,
         layout.bink_texture_offset,
         layout.volume_offset,

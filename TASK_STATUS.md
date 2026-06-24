@@ -3765,3 +3765,956 @@ GitHub now contains the validated lifecycle fix that stops the native title BK2 
 ### Next Step
 
 If desired, prepare updated release notes for a bugfix release.
+
+## 2026-06-25 02:17 CST - Soft-stop No Inner Close Test Build
+
+### Completed
+
+- User found the pushed stop-with-close build can still crash probabilistically when starting a new game directly from the first title menu while the title BK2 is still playing.
+- User also found the crash does not occur when entering gameplay once, returning to title, and then starting a new game after the title BK2 has already stopped.
+- Updated `PLANS.md` with the soft-stop/no-inner-close plan before editing.
+- Changed title movie stop behavior:
+  - removed the direct title BinkTexture close vtable call;
+  - still clears the title `CSMovieIns` BinkTexture pointer at `+0xB8`;
+  - still clears the title active/open flag at `+0x130`;
+  - still clears `CSMovieImp+0x40` only if it points to the tracked title MovieIns;
+  - still preserves `CSMovieIns+0x40/+0x44`.
+- Kept no-rearm/freeze-last-video-frame behavior unchanged.
+- Ran `cargo fmt`.
+- Built successfully with `cargo build --release --offline` and no warnings.
+- Deployed rebuilt DLL to:
+  - `F:\GoldenAge\dll\dynamic_title\dynamic_title_bg.dll`
+- Backed up the previous deployed DLL with suffix:
+  - `.before_soft_stop_no_inner_close_20260625_021648`
+
+### Modified Files
+
+- `F:\GoldenAge\fromsoftware-rs\_Project\dynamic-title-bg\PLANS.md`
+- `F:\GoldenAge\fromsoftware-rs\_Project\dynamic-title-bg\TASK_STATUS.md`
+- `F:\GoldenAge\fromsoftware-rs\_Project\dynamic-title-bg\src\bink_probe.rs`
+- `F:\GoldenAge\dll\dynamic_title\dynamic_title_bg.dll`
+
+### Current Judgment
+
+The remaining direct-new-game crash is most likely a race between the title BinkTexture close vtable call and ER's new-game BK2/movie initialization. The new test build avoids that close call and uses a soft stop instead. If FPS still restores and later BK2 playback is not contaminated, this is safer than explicit BinkTexture destruction.
+
+### Unresolved
+
+- Needs validation:
+  - direct start new game from first title menu while title BK2 is still moving;
+  - gameplay FPS restoration;
+  - later in-game BK2 playback and skip/end;
+  - return-to-title static video-frame fallback.
+- If soft stop prevents crashes but reintroduces 30 fps persistence, the next route is to find an official MovieIns stop/pause function instead of closing BinkTexture directly.
+
+### Next Step
+
+Test direct first-menu new-game start several times with the new deployed DLL.
+
+## 2026-06-25 02:23 CST - Auto Soft-stop On Stable Title Test Build
+
+### Completed
+
+- User tested the soft-stop/no-inner-close build and direct first-menu new-game start still crashed.
+- Reinterpreted the failure: stopping at loading/new-game transition is still too late and collides with ER's new-game BK2/movie setup, even without the BinkTexture close vtable.
+- Updated `PLANS.md` with the stable-title auto-stop plan before editing.
+- Changed the stop monitor:
+  - after the configured grace period, if the title gate is stable/ready, soft-stop the title movie immediately;
+  - if the title gate becomes stable later, soft-stop then;
+  - keep `world_player=true` as a fallback strong stop signal;
+  - no longer waits for loading/hud/gameplay transition after title readiness.
+- Kept the soft-stop field behavior:
+  - no BinkTexture close vtable call;
+  - no `CSMovieIns+0x40/+0x44` writes;
+  - clear only title Bink pointer, active flag, and `CSMovieImp+0x40` when matching.
+- Ran `cargo fmt`.
+- Built successfully with `cargo build --release --offline` and no warnings.
+- Deployed rebuilt DLL to:
+  - `F:\GoldenAge\dll\dynamic_title\dynamic_title_bg.dll`
+- Backed up the previous deployed DLL with suffix:
+  - `.before_auto_soft_stop_stable_title_20260625_022244`
+
+### Modified Files
+
+- `F:\GoldenAge\fromsoftware-rs\_Project\dynamic-title-bg\PLANS.md`
+- `F:\GoldenAge\fromsoftware-rs\_Project\dynamic-title-bg\TASK_STATUS.md`
+- `F:\GoldenAge\fromsoftware-rs\_Project\dynamic-title-bg\src\bink_probe.rs`
+- `F:\GoldenAge\dll\dynamic_title\dynamic_title_bg.dll`
+
+### Current Judgment
+
+The remaining direct-start crash appears to come from timing rather than the exact stop primitive. The safest current test is to exit native MovieImp during the stable title menu window before the user starts a new game, leaving only the bridged static last frame for later title display. This sacrifices continuous title animation after the grace period but should avoid colliding with new-game BK2 setup.
+
+### Unresolved
+
+- Needs validation:
+  - wait at first title menu for at least the current `movie_imp_stop_grace_ms=2000`, then start new game;
+  - if stable, try starting faster than 2 seconds;
+  - if fast start still crashes, lower deployed `movie_imp_stop_grace_ms` to 500ms or less.
+- Continuous animated title playback until the exact moment of starting new game remains unresolved without a safer menu-selection signal or official MovieIns stop function.
+
+### Next Step
+
+Test direct first-menu new-game start after waiting at least two seconds on the title menu. If that is stable but fast start still crashes, tune `movie_imp_stop_grace_ms` lower.
+
+## 2026-06-25 02:31 CST - Native Movie Init Handoff Test Build
+
+### Completed
+
+- User pointed out stable-title auto-stop would freeze the dynamic main menu before entering gameplay, which conflicts with the feature goal.
+- Updated `PLANS.md` with the native MovieIns init handoff plan before editing.
+- Reverted the stable-title auto-stop behavior.
+- Changed stop monitor behavior:
+  - no longer stops on stable title;
+  - no longer stops on loading/hud-default transitions;
+  - keeps only `world_player=true` as a fallback stop signal.
+- Installed the narrow `CSMovieIns` init hook whenever title MovieImp playback is enabled, even if verbose `probe_movie_ins` is off.
+- Added native movie init handoff:
+  - when the tracked title `CSMovieIns` reaches native init with a non-title movie path, soft-stop the title state before calling the original init;
+  - clear title Bink pointer and active flag only;
+  - preserve `CSMovieIns+0x40/+0x44`;
+  - do not clear `CSMovieImp+0x40` during handoff, because ER is about to use the same MovieIns for the new movie;
+  - disable title Bink source capture and keep the last bridged title frame.
+- Added monitor target release handling so the old title stop monitor exits after native movie handoff instead of later touching the new movie.
+- Ran `cargo fmt`.
+- Built successfully with `cargo build --release --offline` and no warnings.
+- Deployed rebuilt DLL to:
+  - `F:\GoldenAge\dll\dynamic_title\dynamic_title_bg.dll`
+- Backed up the previous deployed DLL with suffix:
+  - `.before_native_movie_handoff_20260625_023101`
+
+### Modified Files
+
+- `F:\GoldenAge\fromsoftware-rs\_Project\dynamic-title-bg\PLANS.md`
+- `F:\GoldenAge\fromsoftware-rs\_Project\dynamic-title-bg\TASK_STATUS.md`
+- `F:\GoldenAge\fromsoftware-rs\_Project\dynamic-title-bg\src\lib.rs`
+- `F:\GoldenAge\fromsoftware-rs\_Project\dynamic-title-bg\src\bink_probe.rs`
+- `F:\GoldenAge\dll\dynamic_title\dynamic_title_bg.dll`
+
+### Current Judgment
+
+The most promising non-freezing approach is to keep the dynamic title movie active until ER's native movie init boundary for the next BK2. At that boundary the engine is already on the movie setup path, so handing off the shared MovieIns should be safer than an asynchronous stop monitor colliding with loading or new-game setup.
+
+### Unresolved
+
+- Needs validation:
+  - direct first-menu new-game start while title BK2 is still moving;
+  - main menu remains dynamic until handoff;
+  - new-game BK2 plays normally;
+  - gameplay FPS restores;
+  - later in-game BK2 skip/end stays stable.
+- If direct new-game still crashes, a still-earlier explicit menu selection signal is needed, or an official MovieIns stop/pause function must be found.
+
+### Next Step
+
+Test direct first-menu new-game start with the title BK2 still moving. If it still crashes, enable logging for one repro to see whether `native movie init handoff` fires before the crash.
+
+## 2026-06-25 02:39 CST - Confirm Input Soft-stop Test Build
+
+### Completed
+
+- User tested the native movie init handoff build; direct first-menu new-game still crashed.
+- The log did not contain `native movie init handoff`.
+- The log showed only the late fallback:
+  - `loading=true`;
+  - then `world_player=true`;
+  - then `soft-stopped title movie`.
+- Current interpretation: the crash window is earlier than `CSMovieIns init` and `world_player`, so an explicit user-confirm/menu signal is needed.
+- Updated `PLANS.md` with the confirm-input soft-stop plan before editing.
+- Added Windows keyboard input feature:
+  - `Win32_UI_Input_KeyboardAndMouse`.
+- Added a confirm input monitor after title MovieImp setup succeeds:
+  - polls Enter, Space, left mouse button, gamepad A, and keyboard E;
+  - waits for all confirm keys to be released once before acting, to avoid triggering on a held key;
+  - on confirm input, soft-stops the title movie immediately.
+- Kept existing native movie init handoff and `world_player=true` fallback.
+- Ran `cargo fmt`.
+- Built successfully with `cargo build --release --offline` and no warnings.
+- Deployed rebuilt DLL to:
+  - `F:\GoldenAge\dll\dynamic_title\dynamic_title_bg.dll`
+- Backed up the previous deployed DLL with suffix:
+  - `.before_confirm_input_stop_20260625_023858`
+- Cleared deployed log for the next test.
+
+### Modified Files
+
+- `F:\GoldenAge\fromsoftware-rs\_Project\dynamic-title-bg\Cargo.toml`
+- `F:\GoldenAge\fromsoftware-rs\_Project\dynamic-title-bg\PLANS.md`
+- `F:\GoldenAge\fromsoftware-rs\_Project\dynamic-title-bg\TASK_STATUS.md`
+- `F:\GoldenAge\fromsoftware-rs\_Project\dynamic-title-bg\src\bink_probe.rs`
+- `F:\GoldenAge\dll\dynamic_title\dynamic_title_bg.dll`
+- `F:\GoldenAge\dll\dynamic_title\dynamic-title-bg.log`
+
+### Current Judgment
+
+This is a diagnostic and possible UX compromise: keep the title dynamic while idle/navigation continues, then freeze/soft-stop as soon as the user confirms an action. If it prevents direct new-game crashes, the remaining work is to narrow the signal from broad confirm input to the exact start/continue menu action.
+
+### Unresolved
+
+- Needs validation:
+  - direct first-menu new-game start while title BK2 is moving;
+  - whether the title freezes too early at "press any button" or only when selecting a menu action;
+  - gameplay FPS restoration;
+  - later in-game BK2 playback/skip/end stability.
+
+### Next Step
+
+Test direct first-menu new-game start. If it still crashes, inspect whether `movie imp confirm monitor` and `title confirm input` appear before the crash.
+
+## 2026-06-25 02:45 CST - Confirm Input Reset-state Test Build
+
+### Completed
+
+- User tested confirm-input soft-stop:
+  - title movie stops at "press any button";
+  - direct new-game still crashes.
+- Updated interpretation:
+  - confirm input is early enough to stop visible title playback;
+  - but soft-stop leaves MovieIns in an inconsistent state because Bink pointer/active flag are cleared while `+0x40/+0x44` still show a running movie state.
+- Updated `PLANS.md` with the confirm-reset-state plan before editing.
+- Changed stop behavior by trigger:
+  - confirm-input stop now clears `CSMovieIns+0x40/+0x44` in addition to Bink pointer and active flag;
+  - world-player fallback still preserves `+0x40/+0x44`.
+- Still does not call BinkTexture close.
+- Ran `cargo fmt`.
+- Built successfully with `cargo build --release --offline` and no warnings.
+- Deployed rebuilt DLL to:
+  - `F:\GoldenAge\dll\dynamic_title\dynamic_title_bg.dll`
+- Backed up the previous deployed DLL with suffix:
+  - `.before_confirm_reset_state_20260625_024441`
+- Cleared deployed log for the next test.
+
+### Modified Files
+
+- `F:\GoldenAge\fromsoftware-rs\_Project\dynamic-title-bg\PLANS.md`
+- `F:\GoldenAge\fromsoftware-rs\_Project\dynamic-title-bg\TASK_STATUS.md`
+- `F:\GoldenAge\fromsoftware-rs\_Project\dynamic-title-bg\src\bink_probe.rs`
+- `F:\GoldenAge\dll\dynamic_title\dynamic_title_bg.dll`
+- `F:\GoldenAge\dll\dynamic_title\dynamic-title-bg.log`
+
+### Current Judgment
+
+This test checks whether the direct-new-game crash is caused by a half-stopped MovieIns. If resetting `+0x40/+0x44` on the early confirm path fixes direct new-game, the final implementation should replace broad confirm input with a narrower exact "start/continue game" menu signal.
+
+### Unresolved
+
+- Needs validation:
+  - direct new-game after confirm reset;
+  - whether later in-game BK2 skip/end remains stable after this earlier state reset;
+  - title movie still freezes too early at "press any button" in this diagnostic build.
+
+### Next Step
+
+Test direct first-menu new-game again. If it still crashes, inspect the fresh log for `reset_state=true` and timing relative to loading/world-player.
+
+## 2026-06-25 02:53 CST - Confirm Input Full-close Test Build
+
+### Completed
+
+- User tested confirm reset-state:
+  - new-game CG can play;
+  - skipping CG often crashes/freezes;
+  - four tests: three froze/crashed, one reached gameplay.
+- Updated interpretation:
+  - early state reset solves the pre-CG entry crash;
+  - but leaving the old title BinkTexture unclosed may still poison the following CG skip/end cleanup path.
+- Updated `PLANS.md` with the early-confirm full-close plan before editing.
+- Changed stop behavior by trigger:
+  - confirm-input stop now calls the title BinkTexture close vtable;
+  - confirm-input stop still resets `CSMovieIns+0x40/+0x44`;
+  - world-player fallback still does not close inner BinkTexture and does not reset state.
+- Ran `cargo fmt`.
+- Built successfully with `cargo build --release --offline` and no warnings.
+- Deployed rebuilt DLL to:
+  - `F:\GoldenAge\dll\dynamic_title\dynamic_title_bg.dll`
+- Backed up the previous deployed DLL with suffix:
+  - `.before_confirm_full_close_20260625_025307`
+- Cleared deployed log for the next test.
+
+### Modified Files
+
+- `F:\GoldenAge\fromsoftware-rs\_Project\dynamic-title-bg\PLANS.md`
+- `F:\GoldenAge\fromsoftware-rs\_Project\dynamic-title-bg\TASK_STATUS.md`
+- `F:\GoldenAge\fromsoftware-rs\_Project\dynamic-title-bg\src\bink_probe.rs`
+- `F:\GoldenAge\dll\dynamic_title\dynamic_title_bg.dll`
+- `F:\GoldenAge\dll\dynamic_title\dynamic-title-bg.log`
+
+### Current Judgment
+
+This tests whether explicit BinkTexture close is safe when performed early on user confirm, before ER starts the new-game CG movie setup. If this fixes both new-game entry and CG skip, the remaining problem is UX: replacing broad confirm with an exact start/continue menu action signal.
+
+### Unresolved
+
+- Needs validation:
+  - direct new-game starts reliably;
+  - skipping CG does not freeze/crash;
+  - later in-game BK2 playback/skip/end remains stable.
+- If early close reintroduces direct-entry crash, the close vtable itself is unsafe and we need an official MovieIns stop function or exact menu action hook.
+
+### Next Step
+
+Test direct new-game and CG skip several times. Check the log for `close_inner=true` and `inner_closed=true`.
+
+## 2026-06-25 02:58 CST - MovieIns State Field Logging Build
+
+### Completed
+
+- User tested early-confirm full-close twice:
+  - both attempts still crashed after skipping the new-game CG.
+- Current interpretation:
+  - explicit early close does not fix skip/end instability;
+  - the new-game CG opens successfully, so the remaining issue is likely MovieIns state-machine state after the title handoff.
+- Updated `PLANS.md` with a state-field logging diagnostic plan.
+- Added `CSMovieIns+0x40/+0x44/+0x48` to `log_movie_ins()` output.
+- Kept playback/stop behavior unchanged from the early-confirm full-close build.
+- Ran `cargo fmt`.
+- Built successfully with `cargo build --release --offline` and no warnings.
+- Deployed rebuilt DLL to:
+  - `F:\GoldenAge\dll\dynamic_title\dynamic_title_bg.dll`
+- Backed up the previous deployed DLL with suffix:
+  - `.before_state_field_log_20260625_025828`
+- Cleared deployed log for the next diagnostic run.
+
+### Modified Files
+
+- `F:\GoldenAge\fromsoftware-rs\_Project\dynamic-title-bg\PLANS.md`
+- `F:\GoldenAge\fromsoftware-rs\_Project\dynamic-title-bg\TASK_STATUS.md`
+- `F:\GoldenAge\fromsoftware-rs\_Project\dynamic-title-bg\src\bink_probe.rs`
+- `F:\GoldenAge\dll\dynamic_title\dynamic_title_bg.dll`
+- `F:\GoldenAge\dll\dynamic_title\dynamic-title-bg.log`
+
+### Current Judgment
+
+Do not keep guessing `+0x40/+0x44` values. The next log should show whether the new-game CG init restores the state machine fields after our title reset, and whether skip/end is operating from an unexpected state.
+
+### Unresolved
+
+- Need one fresh diagnostic run:
+  - start new game;
+  - let the CG start;
+  - skip it and allow the crash/freeze;
+  - send the resulting log.
+
+### Next Step
+
+Inspect the next log for `state[+40/+44/+48]` around title init, confirm stop, and new-game CG init.
+
+## 2026-06-25 03:05 CST - Preserve MovieImp Current On Confirm Stop Test Build
+
+### Completed
+
+- Inspected the latest ER diagnostic log after the direct-new-game / CG-skip crash.
+- Confirmed the new-game CG init reaches `movie:/10010010.bk2` and restores normal-looking state:
+  - before init: `state[+40/+44/+48]=0x2/0x2/0x300`;
+  - after init: `state[+40/+44/+48]=0x2/0x3/0x301`;
+  - `CSMovieImp+0x40` points back to the same `CSMovieIns`.
+- Updated `PLANS.md` with the narrow preserve-current test plan.
+- Changed `stop_title_movie_ins` to accept `detach_imp_current`.
+- Changed confirm-input stop to preserve `CSMovieImp+0x40`:
+  - `reset_state=true`;
+  - `close_inner=true`;
+  - `detach_imp_current=false`.
+- Kept the world-player fallback as the only path that detaches `CSMovieImp+0x40`.
+- Added logging for `detach_imp_current`.
+- Ran `cargo fmt`.
+- Built successfully with `cargo build --release --offline`.
+- Deployed rebuilt DLL to:
+  - `F:\GoldenAge\dll\dynamic_title\dynamic_title_bg.dll`
+- Backed up the previous deployed DLL with suffix:
+  - `.before_preserve_imp_current_20260625_030443`
+- Cleared deployed ER log for the next run.
+
+### Modified Files
+
+- `F:\GoldenAge\fromsoftware-rs\_Project\dynamic-title-bg\PLANS.md`
+- `F:\GoldenAge\fromsoftware-rs\_Project\dynamic-title-bg\TASK_STATUS.md`
+- `F:\GoldenAge\fromsoftware-rs\_Project\dynamic-title-bg\src\bink_probe.rs`
+- `F:\GoldenAge\dll\dynamic_title\dynamic_title_bg.dll`
+- `F:\GoldenAge\dll\dynamic_title\dynamic-title-bg.log`
+
+### Current Judgment
+
+The previous log suggests the CG init itself is not malformed. The remaining crash after skipping CG may be caused by the earlier confirm-stop temporarily clearing `CSMovieImp+0x40`, which could disturb MovieImp owner/lifecycle code even though ER later repoints it during CG setup. This build tests that single variable while leaving the rest of the diagnostic behavior unchanged.
+
+### Unresolved
+
+- Needs validation:
+  - direct start new game from the first title menu;
+  - skip the new-game CG;
+  - repeat a few times to check crash probability.
+- The confirm-input stop still freezes the title movie at "press any button"; this remains diagnostic, not final UX.
+- If this still crashes on CG skip, the next likely route is comparing a normal ER new-game CG lifecycle with the title trigger disabled, especially state/tick/skip/end hooks around CG skip.
+
+### Next Step
+
+Test direct new-game and CG skip with the newly deployed DLL. The key expected stop log should include `detach_imp_current=false` and `imp_current_detached=false` on the `title confirm input` line.
+
+## 2026-06-25 03:14 CST - Preserve-current Test Result Analysis
+
+### Completed
+
+- User tested the preserve-current build and direct new-game still crashes/freezes after skipping CG.
+- Inspected the new ER log.
+- Confirmed the expected preserve-current stop happened:
+  - `reason=title confirm input`;
+  - `reset_state=true`;
+  - `close_inner=true`;
+  - `detach_imp_current=false`;
+  - `imp_current_detached=false`.
+- Confirmed the new-game CG still initializes normally afterward:
+  - path becomes `movie:/10010010.bk2`;
+  - `CSMovieImp+0x40` points to the shared `CSMovieIns`;
+  - after init state is `0x2/0x3/0x301` (or equivalent in the same lifecycle family).
+
+### Modified Files
+
+- `F:\GoldenAge\fromsoftware-rs\_Project\dynamic-title-bg\TASK_STATUS.md`
+
+### Current Judgment
+
+The crash is not caused by temporarily clearing `CSMovieImp+0x40`. The stronger explanation is that ER title movie playback and new-game CG playback share the same `CSMovieImp+0x38` / `CSMovieIns` object. Direct-start crashes occur because the DLL force-stops a still-active title BK2 mid-lifecycle and then ER immediately reuses the same MovieIns for the new-game CG. The CG can open, but skip/end cleanup later encounters inconsistent prior state or a resource that was manually closed/reset outside the normal movie lifecycle.
+
+The user-observed stable path ("enter gameplay once, return to title after the title BK2 has ended/stopped, then start new game") fits this: on return, the DLL no longer re-arms native title playback and only shows the frozen last video frame. There is no active title MovieIns to force-stop right before the next CG, so the later CG skip path is much cleaner.
+
+### Unresolved
+
+- Need an official/native stop or end function for `CSMovieIns`/`CSMovieImp`, or a way to avoid using the shared MovieIns for title playback.
+- Need a normal ER control log for new-game CG skip/end without title MovieImp trigger to identify the expected cleanup path.
+
+### Next Step
+
+Recommended next diagnostic: disable `movie_imp_trigger`, keep only narrow MovieIns state/tick/probe logging, run a normal new-game CG and skip it. Compare the native skip/end lifecycle to the title-triggered crash path.
+
+## 2026-06-25 03:17 CST - Native CG Lifecycle Control Probe
+
+### Completed
+
+- Updated `PLANS.md` with the native CG skip/end lifecycle control probe plan.
+- Added a read-only dynamic BinkTexture close hook:
+  - after `CSMovieIns` init returns with a nonzero BinkTexture pointer, read the object's vtable slot `+0x10`;
+  - install a hook on that close function;
+  - log caller, object fields, result, and whether the closed object matches the last observed MovieIns inner BinkTexture.
+- Kept the hook read-only: it calls the original close and does not mutate MovieIns/MovieImp/title descriptors.
+- Ran `cargo fmt`.
+- Built successfully with `cargo build --release --offline`.
+- Deployed rebuilt DLL to:
+  - `F:\GoldenAge\dll\dynamic_title\dynamic_title_bg.dll`
+- Backed up the previous deployed DLL with suffix:
+  - `.before_native_cg_lifecycle_probe_20260625_031615`
+- Changed deployed ER ini to diagnostic control mode:
+  - `movie_imp_trigger=false`;
+  - `bink_plane_hijack=false`;
+  - `probe_movie_ins=true`;
+  - `probe_movie_step=true`;
+  - `probe_movie_tick=true`;
+  - `probe_bink_texture_open=true`;
+  - title SRV/bridge and render/draw submit probes remain disabled.
+- Cleared deployed ER log for the next run.
+
+### Modified Files
+
+- `F:\GoldenAge\fromsoftware-rs\_Project\dynamic-title-bg\PLANS.md`
+- `F:\GoldenAge\fromsoftware-rs\_Project\dynamic-title-bg\TASK_STATUS.md`
+- `F:\GoldenAge\fromsoftware-rs\_Project\dynamic-title-bg\src\bink_probe.rs`
+- `F:\GoldenAge\dll\dynamic_title\dynamic_title_bg.dll`
+- `F:\GoldenAge\dll\dynamic_title\dynamic-title-bg.ini`
+- `F:\GoldenAge\dll\dynamic_title\dynamic-title-bg.log`
+
+### Current Judgment
+
+This is a pure control/diagnostic build. It should not play or bridge the title BK2. The goal is to capture the native ER new-game CG lifecycle, especially which caller invokes BinkTexture close when the CG is skipped or ends normally.
+
+### Unresolved
+
+- Need a fresh log from a normal ER run:
+  - start new game;
+  - let native CG begin;
+  - skip the CG;
+  - send the resulting log.
+- After comparing native close/skip order with the title-trigger crash path, identify whether to call an official stop/end function or avoid the shared MovieIns path for title playback.
+
+### Next Step
+
+Run ER with the current diagnostic deployment, start a new game, skip the native CG, and provide `F:\GoldenAge\dll\dynamic_title\dynamic-title-bg.log`.
+
+## 2026-06-25 03:35 CST - Native Finish Request Test Build
+
+### Completed
+
+- Read the current project status and plan files before changing code.
+- Interpreted the native CG lifecycle control log:
+  - ER's normal skip/end path does more than call BinkTexture close;
+  - it runs the MovieIns state cleanup path around `main.exe+0xE21090`;
+  - that path calls BinkTexture vtable `+0x28`, BinkTexture close `+0x10`, releases/frees the BinkTexture object, clears `MovieIns+0xB8`, updates callback fields, sets `+0x131`, advances state, and then state1 clears `+0x130`.
+- Updated `PLANS.md` with the native-finish-on-confirm plan before implementation.
+- Changed confirm-input handling:
+  - no longer manually calls BinkTexture close;
+  - no longer clears `MovieIns+0xB8`;
+  - no longer clears `MovieIns+0x130`;
+  - no longer resets `MovieIns+0x40/+0x44`;
+  - writes `MovieIns+0x133 = 1` so the next native tick should enter ER's own full cleanup path.
+- Added a short native-finish monitor:
+  - waits for ER to clear `+0xB8` or `+0x130`;
+  - then releases the tracked title MovieIns and freezes the bridged title frame.
+- Expanded MovieIns state table logging from slots 0..5 to 0..7 so state6 cleanup is visible in future logs.
+- Ran `cargo fmt`.
+- Built successfully with `cargo build --release --offline`.
+- Deployed rebuilt DLL to:
+  - `F:\GoldenAge\dll\dynamic_title\dynamic_title_bg.dll`
+- Backed up the previous deployed DLL with suffix:
+  - `.before_native_finish_confirm_20260625_*`
+- Cleared deployed ER log.
+- Switched deployed ER ini back from control-only diagnostic mode to dynamic-title test mode:
+  - `movie_imp_trigger=true`;
+  - `bink_plane_hijack=true`;
+  - lifecycle probes/logging remain enabled for this validation run.
+
+### Modified Files
+
+- `F:\GoldenAge\fromsoftware-rs\_Project\dynamic-title-bg\PLANS.md`
+- `F:\GoldenAge\fromsoftware-rs\_Project\dynamic-title-bg\TASK_STATUS.md`
+- `F:\GoldenAge\fromsoftware-rs\_Project\dynamic-title-bg\src\bink_probe.rs`
+- `F:\GoldenAge\dll\dynamic_title\dynamic_title_bg.dll`
+- `F:\GoldenAge\dll\dynamic_title\dynamic-title-bg.ini`
+- `F:\GoldenAge\dll\dynamic_title\dynamic-title-bg.log`
+
+### Current Judgment
+
+The direct-new-game crash after skipping CG is most likely caused by the DLL force-stopping the shared title `CSMovieIns` outside ER's normal movie state lifecycle. This build tests the safer hypothesis: ask ER's existing state6 cleanup to finish the title movie, instead of doing a partial manual close/reset from the DLL.
+
+Because the trigger is still broad confirm input, the title movie may freeze as early as the "press any button" step. That is acceptable for this diagnostic build; if it fixes the crash, the next UX step is to find a narrower "Start New Game / Continue" menu action signal.
+
+### Unresolved
+
+- Needs validation:
+  - whether the title BK2 still plays and bridges correctly before confirm;
+  - whether the log shows `movie imp native finish: request` followed by `completed`;
+  - whether direct new-game CG starts normally;
+  - whether skipping the CG no longer freezes/crashes.
+- If `movie imp native finish` times out, the `+0x133` request is not enough to make ER run state6 cleanup from the current title state.
+- If cleanup completes but CG skip still crashes, another shared field outside `+0xB8/+0x130/+0x40/+0x44` is being poisoned by the title playback path.
+
+### Next Step
+
+Run ER with the deployed dynamic-title test build. At the first title/menu confirm, check whether the movie freezes and then start a new game directly; skip the new-game CG and send `F:\GoldenAge\dll\dynamic_title\dynamic-title-bg.log` if it still crashes or if the log does not show native finish completion.
+
+## 2026-06-25 03:45 CST - Force State7 Native Finish Test Build
+
+### Completed
+
+- Re-read `TASK_STATUS.md` before continuing.
+- Inspected the latest ER dynamic-title log.
+- Confirmed the confirm monitor did fire after the user's input:
+  - `movie imp native finish: request ... reason=title confirm input`.
+- Confirmed the previous request failed because it only wrote `MovieIns+0x133 = 1`:
+  - the MovieIns stayed in `state[40/44]=6/6`;
+  - `+0x133` stayed at `0x01`;
+  - native cleanup did not run;
+  - monitor timed out and the title BK2 kept playing.
+- Confirmed the expanded state table mapping:
+  - state6 = `main.exe+0xE215C0` (render/playback state);
+  - state7 = `main.exe+0xE21090` (full cleanup state observed in native CG skip/end).
+- Updated `PLANS.md` with the force-state7 native finish plan before editing.
+- Changed `request_title_movie_native_finish` to write:
+  - `MovieIns+0x40 = 7`;
+  - `MovieIns+0x44 = 7`;
+  - `MovieIns+0x133 = 1`.
+- Kept the cleanup call indirect: the DLL still does not call `E21090` directly; it lets the next native MovieIns tick run state7 in engine context.
+- Changed stop monitor fallback:
+  - on `hud_default` or `world_player`, it now requests native finish instead of using the old manual soft-stop path.
+- Removed the now-unused manual `stop_title_movie_ins` function so the old partial close/reset path cannot be accidentally reused.
+- Ran `cargo fmt`.
+- Built successfully with `cargo build --release --offline` and no warnings.
+- Deployed rebuilt DLL to:
+  - `F:\GoldenAge\dll\dynamic_title\dynamic_title_bg.dll`
+- Backed up the previous deployed DLL with suffix:
+  - `.before_force_state7_native_finish_20260625_*`
+- Cleared deployed ER log.
+
+### Modified Files
+
+- `F:\GoldenAge\fromsoftware-rs\_Project\dynamic-title-bg\PLANS.md`
+- `F:\GoldenAge\fromsoftware-rs\_Project\dynamic-title-bg\TASK_STATUS.md`
+- `F:\GoldenAge\fromsoftware-rs\_Project\dynamic-title-bg\src\bink_probe.rs`
+- `F:\GoldenAge\dll\dynamic_title\dynamic_title_bg.dll`
+- `F:\GoldenAge\dll\dynamic_title\dynamic-title-bg.log`
+
+### Current Judgment
+
+The last failure was not input capture. Input was captured, but state6 ignored the countdown request. Since state7 is the actual ER cleanup state, switching `+40/+44` to 7 should make the next normal MovieIns tick call `E21090` and perform the same close/free/flag cleanup observed in native CG skip.
+
+This is still a diagnostic/compatibility build: it may freeze the title video at the first confirm input. If it fixes direct new-game and CG skip crashes, the next task is to narrow the trigger to actual "start/continue game" menu actions.
+
+### Unresolved
+
+- Needs validation:
+  - whether pressing confirm now freezes the title video;
+  - whether log shows `movie imp native finish: completed`;
+  - whether direct start new game no longer instantly crashes;
+  - whether skipping the new-game CG is stable.
+- If state7 cleanup itself crashes or still times out, direct state switching is unsafe and the next route should be either a real engine menu-action hook or avoiding shared `CSMovieImp+0x38` for title playback.
+
+### Next Step
+
+Run ER with the newly deployed DLL, press confirm at the title/menu, then start new game directly and skip the CG. If anything still fails, send `F:\GoldenAge\dll\dynamic_title\dynamic-title-bg.log`.
+
+## 2026-06-25 03:43 CST - Minimal Hook Interference Test Build
+
+### Completed
+
+- Re-read the project `TASK_STATUS.md` and `PLANS.md` before continuing.
+- Inspected the latest ER log after the user's report:
+  - title confirm input was captured;
+  - the forced state7 native finish ran;
+  - ER closed the title BinkTexture through its own cleanup path;
+  - `MovieIns+0xB8` became `0`;
+  - active state became `0`;
+  - the next movie init reached `movie:/10010010.bk2`.
+- Updated `PLANS.md` with the minimal-runtime-hook test plan.
+- Changed `src/lib.rs` so `movie_imp_trigger=true` no longer automatically installs the `CSMovieIns` init probe.
+- Updated deployed ER ini to disable the optional diagnostic probes:
+  - `probe_bink_texture_open=false`;
+  - `probe_movie_ins=false`;
+  - `probe_movie_step=false`;
+  - `probe_movie_tick=false`.
+- Kept the functional title path enabled:
+  - `movie_imp_trigger=true`;
+  - `movie_imp_trigger_on_title_target=true`;
+  - `bink_plane_hijack=true`;
+  - confirm-input native finish behavior unchanged.
+- Ran `cargo fmt`.
+- Built successfully with `cargo build --release --offline`.
+- Deployed rebuilt DLL to:
+  - `F:\GoldenAge\dll\dynamic_title\dynamic_title_bg.dll`
+- Backed up the previous deployed DLL with suffix:
+  - `.before_minimal_hooks_20260625_*`
+- Cleared deployed ER log.
+
+### Modified Files
+
+- `F:\GoldenAge\fromsoftware-rs\_Project\dynamic-title-bg\PLANS.md`
+- `F:\GoldenAge\fromsoftware-rs\_Project\dynamic-title-bg\TASK_STATUS.md`
+- `F:\GoldenAge\fromsoftware-rs\_Project\dynamic-title-bg\src\lib.rs`
+- `F:\GoldenAge\dll\dynamic_title\dynamic-title-bg.ini`
+- `F:\GoldenAge\dll\dynamic_title\dynamic_title_bg.dll`
+- `F:\GoldenAge\dll\dynamic_title\dynamic-title-bg.log`
+
+### Current Judgment
+
+The latest failure is no longer explained by incomplete title cleanup: the title
+native cleanup completed before the new-game CG open began. The strongest next
+hypothesis is that optional diagnostic hooks (`probe_movie_ins`,
+`probe_bink_texture_open`, state/tick hooks, and the dynamic close hook installed
+from those probes) are interfering with the subsequent native CG lifecycle.
+
+This build tests the release-style path where only the title playback trigger and
+SRV bridge remain active, while movie/Bink diagnostic hooks are opt-in only.
+
+### Unresolved
+
+- Needs validation:
+  - pressing confirm should still pause/freeze the title video through native finish;
+  - direct start new game should no longer crash;
+  - new-game CG playback and skip/end should be stable.
+- If it still crashes, the remaining suspect is the functional title bridge or the
+  shared MovieImp/MovieIns state itself rather than the diagnostic probes.
+
+### Next Step
+
+Run ER with the newly deployed minimal-hook build. Press confirm, start a new
+game directly, and skip the new-game CG. If it still crashes, send the fresh
+`F:\GoldenAge\dll\dynamic_title\dynamic-title-bg.log`.
+
+## 2026-06-25 03:58 CST - Handoff Stop Without Confirm Pause
+
+### Completed
+
+- Re-read `TASK_STATUS.md` and `PLANS.md` before continuing.
+- User clarified the desired behavior:
+  - do not pause/finish the title BK2 on ordinary confirm/key press;
+  - keep the title BK2 moving until starting a game or another native BK2 path begins;
+  - then disable/finish the title movie and let ER continue its normal logic.
+- Reverted the not-yet-deployed dummy-restore experiment in `dx12_title_texture.rs`.
+- Updated `PLANS.md` with the no-confirm handoff plan.
+- Removed the confirm-input stop monitor from the runtime path:
+  - no `GetAsyncKeyState` polling;
+  - no pause on pressing Enter/Space/E/LMB/Gamepad A.
+- Removed the unused Windows keyboard input feature from `Cargo.toml`.
+- Reintroduced a narrow `CSMovieIns` init hook as a functional handoff hook when
+  `movie_imp_trigger=true`, while keeping verbose movie probes disabled when
+  `probe_movie_ins=false`.
+- Changed movie-init handoff behavior:
+  - old behavior was a soft stop that manually cleared `+B8` and `+130`;
+  - new behavior requests the same state7 native finish path used by the confirm
+    test (`+40/+44 = 7`, `+133 = 1`) when a tracked title `MovieIns` is about to
+    initialize a non-title movie path.
+- Kept `world_player` / HUD fallback stop path as a late backup.
+- Ran `cargo fmt`.
+- Built successfully with `cargo build --release --offline`.
+- Deployed rebuilt DLL to:
+  - `F:\GoldenAge\dll\dynamic_title\dynamic_title_bg.dll`
+- Backed up the previous deployed DLL with suffix:
+  - `.before_handoff_no_confirm_20260625_*`
+- Cleared deployed ER log.
+
+### Modified Files
+
+- `F:\GoldenAge\fromsoftware-rs\_Project\dynamic-title-bg\Cargo.toml`
+- `F:\GoldenAge\fromsoftware-rs\_Project\dynamic-title-bg\PLANS.md`
+- `F:\GoldenAge\fromsoftware-rs\_Project\dynamic-title-bg\TASK_STATUS.md`
+- `F:\GoldenAge\fromsoftware-rs\_Project\dynamic-title-bg\src\bink_probe.rs`
+- `F:\GoldenAge\fromsoftware-rs\_Project\dynamic-title-bg\src\lib.rs`
+- `F:\GoldenAge\dll\dynamic_title\dynamic_title_bg.dll`
+- `F:\GoldenAge\dll\dynamic_title\dynamic-title-bg.log`
+
+### Current Judgment
+
+This is closer to the desired user experience: title BK2 should keep playing
+through normal title/menu button presses. The title movie finish is now requested
+only at the native movie handoff boundary, when ER is about to initialize a
+non-title movie such as the new-game CG.
+
+This hook point may still be slightly late because `CSMovieIns` init is close to
+Bink open. If it still races/crashes, the next step is an earlier setup hook at
+`CSMovieIns` setup (`main.exe+0xE20F90`) or an exact menu action hook for
+Start/Continue/Load.
+
+### Unresolved
+
+- Needs validation:
+  - title video should not pause when pressing the first confirm/key;
+  - starting new game should log `native movie init handoff`;
+  - direct new-game CG should start and skip/end without crash;
+  - gameplay FPS should return to normal.
+- If handoff does not log before the crash, this boundary is too late or not hit.
+
+### Next Step
+
+Run ER with the newly deployed no-confirm-pause build. Start a new game directly
+while the title BK2 is moving, then skip the new-game CG. If it fails, send
+`F:\GoldenAge\dll\dynamic_title\dynamic-title-bg.log`.
+
+## 2026-06-25 04:06 CST - Earlier Setup Handoff Test Build
+
+### Completed
+
+- Read the latest user log after "start new game crashes immediately".
+- Confirmed the previous `CSMovieIns` init handoff was too late or not reached:
+  - log contains no `native movie init handoff`;
+  - only the title trigger/setup and Bink bridge are visible.
+- Confirmed the stop monitor still used `hud_default=true` as a stop condition:
+  - it requested `left title menu gate`;
+  - state7 native finish completed before actual new-game setup;
+  - this recreates the earlier "title movie already stopped before direct start" situation.
+- Updated `PLANS.md` with the earlier setup handoff plan.
+- Added an ER-only hook on `CSMovieIns` setup:
+  - `main.exe+0xE20F90`;
+  - installed automatically when `movie_imp_trigger=true`;
+  - remains independent of verbose `probe_movie_ins`.
+- The setup hook:
+  - decodes incoming UTF-16 path from `r8`;
+  - ignores the title path `movie:/00001010.bk2`;
+  - when the tracked title `MovieIns` receives a non-title setup path, requests
+    state7 native finish before calling the original setup;
+  - waits briefly for `+B8` or `+130` to clear before continuing.
+- Changed the stop monitor fallback:
+  - removed `hud_default` as a stop condition;
+  - kept `world_player=true` as the late gameplay fallback.
+- Ran `cargo fmt`.
+- Built successfully with `cargo build --release --offline`.
+- Deployed rebuilt DLL to:
+  - `F:\GoldenAge\dll\dynamic_title\dynamic_title_bg.dll`
+- Backed up the previous deployed DLL with suffix:
+  - `.before_setup_handoff_20260625_*`
+- Cleared deployed ER log.
+
+### Modified Files
+
+- `F:\GoldenAge\fromsoftware-rs\_Project\dynamic-title-bg\PLANS.md`
+- `F:\GoldenAge\fromsoftware-rs\_Project\dynamic-title-bg\TASK_STATUS.md`
+- `F:\GoldenAge\fromsoftware-rs\_Project\dynamic-title-bg\src\bink_probe.rs`
+- `F:\GoldenAge\fromsoftware-rs\_Project\dynamic-title-bg\src\lib.rs`
+- `F:\GoldenAge\dll\dynamic_title\dynamic_title_bg.dll`
+- `F:\GoldenAge\dll\dynamic_title\dynamic-title-bg.log`
+
+### Current Judgment
+
+The previous handoff point (`CSMovieIns` init/open) was too late. The earlier
+setup hook should catch new-game CG setup before the path/state is overwritten.
+Removing `hud_default` prevents the title movie from being stopped merely by
+arriving at the normal menu/HUD title state.
+
+There is still a possible race: requesting state7 from inside setup may need a
+native tick to run. The hook now waits briefly, but if the setup call is on the
+same thread required for cleanup, it may timeout and still be too late.
+
+### Unresolved
+
+- Needs validation:
+  - title BK2 should continue moving during normal menu interaction;
+  - starting new game should log `movie setup handoff`;
+  - direct new-game should not crash at setup;
+  - new-game CG skip/end should remain stable;
+  - gameplay FPS should recover.
+- If setup wait times out or start still crashes, next likely options are:
+  - direct call to ER's state7 cleanup function with verified arguments;
+  - exact Start/Continue/Load menu action hook before movie setup begins;
+  - avoiding shared `CSMovieImp+0x38` for title playback.
+
+### Next Step
+
+Run ER with this setup-handoff build. Start a new game directly while title BK2
+is moving. If it crashes, send the fresh
+`F:\GoldenAge\dll\dynamic_title\dynamic-title-bg.log`.
+
+## 2026-06-25 04:13 CST - Delayed World-player Cleanup Test Build
+
+### Completed
+
+- Inspected the latest setup-handoff log after direct start still crashed.
+- Confirmed the setup hook installed successfully and the title setup path still worked.
+- Confirmed no non-title setup handoff was logged before the crash.
+- Confirmed the stop monitor reached:
+  - `hud_default=true`;
+  - then `world_player=true`;
+  - then requested `left title menu gate`;
+  - state7 native finish completed immediately;
+  - log ended after cleanup.
+- Updated `PLANS.md` with a delayed world-player cleanup timing probe.
+- Added limited setup hook logging for the first few setup calls so future logs
+  can prove whether new-game setup is actually called.
+- Changed stop monitor world fallback:
+  - no longer requests cleanup on the first `world_player=true` tick;
+  - logs `world player detected, delaying cleanup`;
+  - requires `world_player=true` to remain stable for about 2 seconds before
+    requesting state7 cleanup.
+- Kept setup handoff hook active.
+- Ran `cargo fmt`.
+- Built successfully with `cargo build --release --offline`.
+- Deployed rebuilt DLL to:
+  - `F:\GoldenAge\dll\dynamic_title\dynamic_title_bg.dll`
+- Backed up the previous deployed DLL with suffix:
+  - `.before_delayed_world_cleanup_20260625_*`
+- Cleared deployed ER log.
+
+### Modified Files
+
+- `F:\GoldenAge\fromsoftware-rs\_Project\dynamic-title-bg\PLANS.md`
+- `F:\GoldenAge\fromsoftware-rs\_Project\dynamic-title-bg\TASK_STATUS.md`
+- `F:\GoldenAge\fromsoftware-rs\_Project\dynamic-title-bg\src\bink_probe.rs`
+- `F:\GoldenAge\dll\dynamic_title\dynamic_title_bg.dll`
+- `F:\GoldenAge\dll\dynamic_title\dynamic-title-bg.log`
+
+### Current Judgment
+
+The direct-start crash may be caused by cleaning up the title MovieIns exactly
+when the first world player object appears. That moment may be too early in world
+construction even though it restores FPS in later/stabler paths. This build
+tests whether delaying the same native state7 cleanup until world state is stable
+prevents the crash.
+
+### Unresolved
+
+- Needs validation:
+  - whether direct start no longer crashes before cleanup;
+  - whether cleanup after the 2 second world-player stable window restores FPS;
+  - whether any non-title setup call appears in log.
+- If it still crashes before delayed cleanup, the crash is not caused by the
+  cleanup call and likely comes from leaving the title movie active during the
+  transition or from the shared MovieImp state itself.
+
+### Next Step
+
+Run ER with the delayed-world-cleanup build. Start a new game directly. If it
+crashes, send the fresh `F:\GoldenAge\dll\dynamic_title\dynamic-title-bg.log`.
+
+## 2026-06-25 04:18 CST - Delayed Cleanup Success
+
+### Completed
+
+- User reported the delayed world-player cleanup build succeeded:
+  - starting a new game now plays the CG normally;
+  - skipping the CG enters gameplay normally;
+  - gameplay returns to 60 fps.
+- Inspected the fresh log and confirmed the stable sequence:
+  - title setup call uses `movie:/00001010.bk2`;
+  - stop monitor detects `world_player=true` and delays cleanup;
+  - after 20 ticks of 100ms, it requests native finish with reason
+    `world player stable`;
+  - state7 native finish completes:
+    `inner[+B8]=0x0`, `active=0x00`, `state=0x1/0x1`;
+  - new-game CG setup appears afterward as `movie:/10010010.bk2`.
+
+### Modified Files
+
+- `F:\GoldenAge\fromsoftware-rs\_Project\dynamic-title-bg\TASK_STATUS.md`
+
+### Current Judgment
+
+The crash was caused by cleaning up the title MovieIns too early, exactly when
+`world_player=true` first appeared during world construction. Delaying cleanup
+until the world-player signal remains stable avoids the race while still allowing
+state7 native cleanup to restore normal gameplay FPS.
+
+The current stable baseline is:
+
+- no confirm/key pause;
+- no `hud_default` stop;
+- setup handoff hook remains available;
+- world-player fallback waits about 2 seconds before requesting native finish.
+
+### Unresolved
+
+- The 2 second delay is conservative. It can likely be tuned down after repeated
+  tests, but the current value is the first confirmed stable value.
+- Return-to-title behavior should still be considered the previous static/frozen
+  video-frame baseline unless separately retested.
+- Need repeat tests for:
+  - Continue;
+  - Load Game;
+  - starting new game without skipping CG;
+  - other in-game BK2 playback/skip/end.
+
+### Next Step
+
+Keep this build as the current stable baseline. If desired, tune the world-player
+stable delay downward in small steps after several successful direct-start tests.
+
+## 2026-06-25 04:25 CST - GitHub Push Preparation
+
+### Completed
+
+- User requested to keep the current successful build and push it to GitHub.
+- Confirmed current stable behavior:
+  - title BK2 continues playing through normal menu interaction;
+  - direct new game plays CG normally;
+  - skipping CG enters gameplay at 60 fps;
+  - title MovieIns cleanup happens after a delayed stable `world_player` signal.
+- Checked git worktree scope:
+  - `PLANS.md`;
+  - `TASK_STATUS.md`;
+  - `src\bink_probe.rs`;
+  - `src\lib.rs`.
+- Confirmed remote:
+  - `git@github.com:KamiyamaShiki0704/dynamic_title.git`.
+- Validation already run for this code state:
+  - `cargo build --release --offline`.
+
+### Modified Files
+
+- `F:\GoldenAge\fromsoftware-rs\_Project\dynamic-title-bg\TASK_STATUS.md`
+
+### Current Judgment
+
+The current build is the first confirmed stable direct-start baseline. It should
+be committed and pushed as-is before further tuning.
+
+### Unresolved
+
+- `gh` CLI is installed but not logged in, so GitHub PR/release automation via
+  `gh` is unavailable. Direct SSH git push is still expected to work.
+
+### Next Step
+
+Commit the scoped changes and push `main` to GitHub, then provide release notes
+for the user to paste into GitHub Releases.

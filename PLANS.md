@@ -58,6 +58,50 @@ Executed after slot2 did not hit:
 - Prefer high-level StaffRollScreen/Scene/GFX binding probes over render-chain probes.
 - Keep ER deployment in safe all-off state unless intentionally running a narrow test.
 
+### Follow-up Adjustment: Minimal Runtime Hooks For Direct New-game Crash
+
+The latest dynamic-title log shows the title `MovieIns` native finish did complete:
+ER ran the state7 cleanup path, closed the old BinkTexture, cleared `MovieIns+0xB8`,
+and dropped active state before the new-game CG started. The log then reaches the
+next native CG path `movie:/10010010.bk2`, so the remaining direct-start crash is
+more likely caused by our diagnostic hooks staying active on the global movie/Bink
+path than by incomplete title cleanup.
+
+1. Do not auto-install `CSMovieIns` init probe just because `movie_imp_trigger`
+   is enabled; install it only when `probe_movie_ins=true`.
+2. Keep the functional title path intact:
+   - title-target delayed `movie_imp_trigger`;
+   - native-finish request on confirm input;
+   - Bink plane/SRV bridge.
+3. Disable the deployed diagnostic probes for the next test:
+   - `probe_movie_ins=false`;
+   - `probe_movie_step=false`;
+   - `probe_movie_tick=false`;
+   - `probe_bink_texture_open=false`.
+4. Keep logging enabled only for trigger/bridge/finish monitor messages.
+5. Build/deploy and test direct start new game again. If the crash disappears,
+   the release path should keep movie/Bink diagnostic probes opt-in only.
+
+### Follow-up Adjustment: Restore Dummy Descriptor On Title Stop
+
+The minimal-hook log still shows title native finish completing cleanly. If
+direct new-game still crashes, the next suspect is the frozen bridge itself:
+`MENU_DummyMovie` remains pointed at the title Bink RGB resource, and the DLL
+keeps a COM clone of that resource so the static video frame can remain visible.
+That may keep old title movie GPU resources alive while ER immediately opens the
+new-game CG movie.
+
+1. Store the original `MENU_DummyMovie` target SRV resource/desc when the title
+   descriptor is first identified.
+2. Store the original `CreateShaderResourceView` trampoline pointer from the SRV
+   hook so the descriptor can be restored outside the hook.
+3. On title stop/native finish request, restore the title descriptor back to its
+   original dummy SRV and drop the stored Bink RGB resource clone.
+4. Keep Bink source capture disabled after title stop.
+5. This test intentionally sacrifices the static-video-frame fallback after
+   confirm/return; if it fixes direct-new-game crash, replace it later with an
+   owned copy texture instead of retaining the Bink-owned resource.
+
 ## Active Plan: CSMovieImp Global Owner Probe
 
 The constructor probe installed cleanly but did not hit in the latest NR run, while the stable CSMovieIns open helper still captured `movie:/00001010.bk2`. Move the next read-only observation to the MovieImp singleton relation.
@@ -724,3 +768,235 @@ The non-destructive detach test was too light: the native title movie kept ticki
 3. Do not reset `MOVIE_IMP_TRIGGER_STARTED` after the stop, so the title target callback cannot restart native BK2 when returning to the title menu in the same process.
 4. Add a bridge reset variant that freezes the last video frame and keeps the title callback marked fired.
 5. Build, deploy, and retest gameplay FPS plus in-game BK2 skip/end behavior.
+
+### Follow-up Adjustment: Soft-stop Title Movie To Avoid New-game BK2 Race
+
+The stop-with-close build can still crash probabilistically when starting a new game directly from the first title menu while the title BK2 is still playing. If the user first enters gameplay once, returns to title, and the title BK2 has already stopped, starting a new game is stable. This points to a race between the title BinkTexture close vtable call and ER's own new-game BK2/movie initialization.
+
+1. Keep the no-rearm behavior so returning to title cannot restart native title BK2 in the same process.
+2. Keep preserving `CSMovieIns+0x40/+0x44` state-machine fields.
+3. Remove the direct title BinkTexture close vtable call from the gameplay stop path.
+4. Soft-stop the title movie by clearing only:
+   - title `CSMovieIns` BinkTexture pointer;
+   - title active/open flag at `+0x130`;
+   - `CSMovieImp+0x40` when it points to the title MovieIns.
+5. Keep freezing the last bridged title video frame.
+6. Build/deploy and test direct first-menu new-game start several times.
+
+### Follow-up Adjustment: Auto Soft-stop On Stable Title
+
+Soft-stopping at the gameplay/loading transition is still too late: direct first-menu new-game start can crash while the title movie is still active. Move the stop earlier, into the stable title-menu window.
+
+1. Keep the soft-stop behavior: no BinkTexture close vtable call, no `+0x40/+0x44` state-machine writes.
+2. After MovieImp setup and the configured grace period, if the title gate is stable/ready, soft-stop the title movie immediately.
+3. If the title gate becomes stable later, soft-stop then instead of merely arming for a later loading/gameplay transition.
+4. Keep `world_player=true` as a fallback strong stop signal.
+5. Preserve no-rearm/static-last-video-frame behavior.
+6. Deploy with the existing `movie_imp_stop_grace_ms` first, then tune the grace lower only if direct-start can beat the auto-stop.
+
+### Follow-up Adjustment: Handoff At Native Movie Init
+
+Auto-stopping during the stable title menu would freeze the dynamic main menu before the user enters gameplay, which conflicts with the goal. Instead, keep the title movie moving until ER actually starts another movie.
+
+1. Revert stable-title auto-stop behavior.
+2. Stop using loading/hud-default transitions as title stop signals because they are too close to new-game BK2 initialization and can race.
+3. Always install the narrow `CSMovieIns` init hook when title MovieImp playback is enabled.
+4. In `CSMovieIns` init, detect when the tracked title MovieIns is about to initialize a non-title movie path.
+5. At that exact native movie-init boundary, soft-stop the title state without calling BinkTexture close:
+   - clear title Bink pointer;
+   - clear active/open flag;
+   - disable Bink source capture and keep the last title frame;
+   - do not clear `CSMovieImp+0x40` during handoff because ER is about to use the same MovieIns for the new movie.
+6. Keep `world_player=true` as a fallback stop for paths that enter gameplay without a new BK2.
+7. Build/deploy and test direct first-menu new-game start while the title BK2 is still moving.
+
+### Follow-up Adjustment: Stop On User Confirm Input
+
+The crash log showed no native movie init handoff before the direct-start crash, and the only recorded stop was the late `world_player=true` fallback. Add an earlier user-confirm signal.
+
+1. Keep the dynamic title movie running while the user only watches/navigates the main menu.
+2. Add a small title stop monitor that polls keyboard/gamepad confirm inputs after title movie setup succeeds.
+3. On confirm input, soft-stop the title movie immediately:
+   - no BinkTexture close;
+   - no `+0x40/+0x44` writes;
+   - clear title Bink pointer/active flag and matching `CSMovieImp+0x40`.
+4. Leave the native movie init handoff and world-player fallback in place.
+5. Add the required Windows keyboard input feature to `Cargo.toml`.
+6. Build/deploy and test direct first-menu new-game start while the title BK2 is still moving.
+
+### Follow-up Adjustment: Reset Movie State On Confirm Stop
+
+The confirm-input build stops the visible title movie on "press any button", but direct new-game still crashes. This suggests soft-stop leaves `CSMovieIns` in an inconsistent half-stopped state: Bink pointer and active flag are cleared while state fields remain in a movie-running state.
+
+1. Keep broad confirm input as a diagnostic trigger for now.
+2. For confirm-triggered stop only, clear `CSMovieIns+0x40/+0x44` along with Bink pointer and active flag.
+3. Keep world-player fallback as the lighter preserve-state stop, because clearing state later in gameplay previously caused in-game BK2 skip/end instability.
+4. Do not call BinkTexture close.
+5. Build/deploy and test direct new-game start again.
+
+### Follow-up Adjustment: Early Confirm Full Close
+
+The confirm reset-state build allows the new-game CG to play, but skipping the CG often crashes. This suggests the old title BinkTexture may still need a real close, but only at an earlier safe point before new-game movie initialization begins.
+
+1. Keep confirm-input as the early diagnostic trigger.
+2. On confirm-input stop only, call the title BinkTexture close vtable before clearing the pointer.
+3. Also reset `CSMovieIns+0x40/+0x44` on this early confirm path.
+4. Keep the world-player fallback as the lighter no-close/no-state-reset stop.
+5. Build/deploy and test:
+   - direct new-game CG starts;
+   - skipping CG does not crash;
+   - later in-game BK2 skip/end remains stable.
+
+### Follow-up Diagnostic: Log MovieIns State Machine Fields
+
+Early confirm full-close still crashes when skipping the new-game CG. The CG opens successfully, so the problem is likely the MovieIns state machine after the title handoff.
+
+1. Add `CSMovieIns+0x40/+0x44/+0x48` to `log_movie_ins()`.
+2. Keep current behavior unchanged for one diagnostic build.
+3. Use the next log to compare:
+   - title movie after init;
+   - confirm stop after reset;
+   - new-game CG before/after init;
+   - final state before skip crash, if available.
+4. If `+0x40/+0x44` remain at an invalid value after new CG init, test restoring the state to the value ER expects instead of blindly clearing to `0/0`.
+
+### Follow-up Adjustment: Preserve MovieImp Current On Confirm Stop
+
+The latest diagnostic log shows the new-game CG (`movie:/10010010.bk2`) initializes normally after the confirm stop, including a sane state transition and `CSMovieImp+0x40` pointing back to the shared `CSMovieIns`. The remaining crash happens after skipping the CG, so the next low-risk variable is the earlier temporary detach of `CSMovieImp+0x40`.
+
+1. Keep the confirm-input stop timing and current reset/inner-close behavior for one test.
+2. Add an explicit `detach_imp_current` flag to the title stop helper.
+3. For confirm-input stop, preserve `CSMovieImp+0x40` instead of clearing it.
+4. For `world_player` fallback stop, keep clearing `CSMovieImp+0x40` when it still points at the tracked title MovieIns.
+5. Log whether detaching was requested and whether it actually happened.
+6. Build, deploy, clear the ER log, then test direct new game and CG skip again.
+
+### Follow-up Diagnostic: Native CG Skip/End Lifecycle Control
+
+The preserve-current test still crashes after skipping the new-game CG. The next diagnostic should compare against ER's native movie lifecycle without the title MovieImp trigger active.
+
+1. Disable `movie_imp_trigger` in the deployed ER config so the DLL does not start the title BK2.
+2. Keep only read-only movie probes enabled:
+   - `probe_movie_ins=true`;
+   - `probe_movie_step=true`;
+   - `probe_movie_tick=true`;
+   - `probe_bink_texture_open=true` if needed for Bink object details.
+3. Add a read-only dynamic BinkTexture close hook:
+   - after `CSMovieIns` init returns a nonzero BinkTexture pointer, read its vtable slot `+0x10`;
+   - install one hook on that close function;
+   - log caller, object, vtable, Bink handle fields, and whether it matches the last observed movie BinkTexture.
+4. Do not mutate MovieIns, MovieImp, BinkTexture, title descriptors, or D3D resources in this diagnostic mode.
+5. Deploy the diagnostic DLL and config, clear log, then ask for one normal ER run:
+   - start new game;
+   - let the native CG begin;
+   - skip it;
+   - send the log.
+6. Compare native close/skip order against the title-trigger crash path to identify the official stop/end boundary.
+
+### Follow-up Adjustment: Request Native MovieIns Finish On Confirm
+
+The native CG lifecycle control log shows ER does not only call the BinkTexture
+close vtable when a movie is skipped or ends. The normal cleanup path also calls
+the BinkTexture pre-close slot, releases the BinkTexture object, clears
+`MovieIns+0xB8`, updates callback fields, marks `+0x131`, advances state, and
+then lets state1 clear `+0x130`. The previous title-confirm stop skipped much of
+that lifecycle and can poison the next new-game CG cleanup.
+
+1. Keep the broad confirm-input trigger as the current diagnostic early signal.
+2. Replace the confirm-input manual stop path with a native-finish request:
+   - do not call the BinkTexture close vtable from the DLL;
+   - do not clear `MovieIns+0xB8`;
+   - do not clear `MovieIns+0x130`;
+   - do not reset `MovieIns+0x40/+0x44`;
+   - write `MovieIns+0x133 = 1` so ER's current movie state can enter its own
+     full cleanup on the next native tick.
+3. Freeze the bridged title frame immediately so the title descriptor keeps the
+   last video frame while the native cleanup completes.
+4. Add a short monitor that waits for native cleanup to clear `+0xB8` or
+   `+0x130`, then releases the tracked title parent and stop-monitor guard.
+5. Keep the world-player fallback path unchanged for now.
+6. Deploy with dynamic-title playback enabled and verbose movie lifecycle logs
+   still on for one validation run.
+
+### Follow-up Adjustment: Force MovieIns Cleanup State On Native Finish Request
+
+The first native-finish request build did capture the confirm input and wrote
+`MovieIns+0x133 = 1`, but the MovieIns stayed in `state[40/44]=6/6` and the
+video kept playing until the monitor timed out. The expanded state table showed
+that ER's full cleanup function `main.exe+0xE21090` is state slot 7, while state
+6 is the render/playback state `main.exe+0xE215C0`.
+
+1. Keep the native-finish request path, but make it set the state machine to the
+   cleanup state:
+   - write `MovieIns+0x40 = 7`;
+   - write `MovieIns+0x44 = 7`;
+   - write `MovieIns+0x133 = 1`.
+2. Do not call the cleanup function directly from the DLL thread; let the next
+   native MovieIns tick call state7 in the normal engine context.
+3. Keep freezing the bridged title frame immediately.
+4. Add a leave-title fallback in the stop monitor: if HUD default or world
+   player appears while the title movie is still tracked, request native finish
+   instead of the old manual soft-stop path.
+5. Build/deploy and test direct new-game start plus CG skip again.
+
+### Follow-up Adjustment: Handoff Finish On New Movie Init Instead Of Confirm Input
+
+The confirm-input native finish path is technically using ER's cleanup state, but
+the user experience is wrong because it freezes the title BK2 as soon as the
+player presses a button on the title/menu. The desired behavior is to keep the
+title BK2 moving until ER actually starts a new movie path such as new-game CG.
+
+1. Disable the broad confirm-input monitor for normal dynamic-title operation.
+2. Re-enable a narrow `CSMovieIns` init hook as a functional handoff hook when
+   `movie_imp_trigger=true`, not as a verbose diagnostic probe.
+3. In that hook, when the tracked title `MovieIns` is about to initialize a
+   non-title path, request the same state7 native finish used by the confirm test.
+4. Replace the old handoff soft-stop behavior with native-finish request:
+   - do not clear `+B8` manually;
+   - do not clear `+130` manually;
+   - write state `+40/+44 = 7` and `+133 = 1`;
+   - freeze the visible bridge frame immediately.
+5. Let the original ER movie init continue after this request for the first test.
+   If it still races, add a bounded wait/yield at the handoff boundary in a later
+   build.
+6. Keep `world_player`/HUD fallback as a late backup for paths that enter gameplay
+   without starting another movie.
+
+### Follow-up Adjustment: Earlier Setup Handoff
+
+The no-confirm-pause test crashed at new-game start and did not log
+`native movie init handoff`. The `CSMovieIns` init boundary is therefore too
+late or not reached before the crash. The log also showed the stop monitor using
+`hud_default=true` as an early leave-title signal, which stops the title movie
+before actual game start and recreates the old pre-stop crash setup.
+
+1. Remove `hud_default` as a stop condition; keep only `world_player=true` as a
+   late gameplay fallback.
+2. Install an ER-only hook at `CSMovieIns` setup `main.exe+0xE20F90` when
+   `movie_imp_trigger=true`.
+3. In the setup hook, decode the incoming UTF-16 path pointer from `r8`.
+4. If the tracked title `MovieIns` is active and the incoming path is not the
+   title path `movie:/00001010.bk2`, request the same state7 native finish before
+   calling original setup.
+5. Wait briefly for the native finish to clear `+B8` or `+130`; if the same
+   thread cannot progress cleanup, the log should show a timeout and the next
+   step will be a direct cleanup call or exact menu action hook.
+6. Keep verbose movie probes disabled for this test.
+
+### Follow-up Adjustment: Exact World-player Cleanup Timing Probe
+
+The setup handoff build did not log a non-title setup call before the crash.
+The log showed `world_player=true`, then state7 cleanup completed immediately,
+then the process crashed/stopped. This means the direct-start path being tested
+may enter world state without a new CG setup first, and the late world-player
+cleanup itself may be unsafe during the first frames of world creation.
+
+1. Temporarily remove `world_player=true` as an immediate cleanup condition.
+2. Keep setup handoff hook installed for any path that does start a native movie.
+3. Add a delayed world-player cleanup monitor:
+   - require `world_player=true` continuously for a short grace period;
+   - then request state7 finish after world creation has settled.
+4. Keep title BK2 active during the short grace window, accepting a brief 30 fps
+   lock after entering world for this test.
+5. If delayed cleanup fixes direct-start crash and restores FPS shortly after,
+   tune the grace period down.

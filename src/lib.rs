@@ -54,7 +54,11 @@ pub unsafe extern "C" fn DllMain(hmodule: HINSTANCE, reason: u32, _: *mut c_void
             );
         }
         if config.probe_movie_ins {
-            bink_probe::install_movie_ins_probe(config.log_path.clone());
+            bink_probe::install_movie_ins_probe(config.log_path.clone(), true, false);
+        }
+        if config.movie_imp_trigger {
+            bink_probe::install_movie_ins_probe(config.log_path.clone(), false, true);
+            bink_probe::install_movie_setup_handoff_hook(config.log_path.clone());
         }
         if config.probe_movie_step {
             bink_probe::install_movie_step_probe(config.log_path.clone());
