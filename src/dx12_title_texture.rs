@@ -236,16 +236,16 @@ pub(crate) fn install(
     }
 }
 
-pub(crate) fn reset_bink_bridge_cycle(reason: &str) {
+pub(crate) fn freeze_bink_bridge_after_title_stop(reason: &str) {
     BINK_SOURCE_CAPTURE_ENABLED.store(0, Ordering::Release);
     BINK_PLANE_MATCH_COUNT.store(0, Ordering::Release);
-    TITLE_TARGET_CALLBACK_FIRED.store(0, Ordering::Release);
+    TITLE_TARGET_CALLBACK_FIRED.store(1, Ordering::Release);
     let has_video_source = STORED_BINK_PLANE
         .lock()
         .map(|source| source.is_some())
         .unwrap_or(false);
     append_log(&format!(
-        "dx12 title texture probe: reset bink bridge cycle reason={reason} froze_video_source={} preserved_title_descriptor=0x{:X}",
+        "dx12 title texture probe: freeze bink bridge after title stop reason={reason} froze_video_source={} preserved_title_descriptor=0x{:X}",
         has_video_source,
         STORED_TITLE_DESCRIPTOR.load(Ordering::Acquire)
     ));

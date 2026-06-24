@@ -3609,3 +3609,130 @@ GitHub now has the stable release baseline: initial title BK2 playback, gameplay
 ### Next Step
 
 Provide release notes for the user to paste into GitHub Releases.
+
+## 2026-06-25 01:52 CST - Non-destructive MovieImp Detach Test Build
+
+### Completed
+
+- Re-read project protocol and active `dynamic-title-bg` status/plan files before making changes.
+- Added root `TASK_STATUS.md` and `PLANS.md` pointer files because the repository-level protocol files were missing after the project migration.
+- Wrote the non-destructive MovieImp detach plan to `PLANS.md`.
+- Changed the gameplay stop path from destructive close to detach:
+  - no longer calls the inner BinkTexture close vtable;
+  - no longer clears `CSMovieIns+0xB8`, `+0x130`, `+0x40`, or `+0x44`;
+  - only clears `CSMovieImp+0x40` when it still points at the tracked title `CSMovieIns`.
+- Removed the return-to-title re-arm monitor from the stable path, because true replay is unresolved and repeated MovieImp setup can interfere with later movie playback.
+- Kept the freeze-last-video-frame bridge reset behavior after leaving title.
+- Ran `cargo fmt`.
+- Built successfully with `cargo build --release --offline` and no warnings.
+- Deployed rebuilt DLL to:
+  - `F:\GoldenAge\dll\dynamic_title\dynamic_title_bg.dll`
+- Backed up the previous deployed DLL with suffix:
+  - `.before_nondestructive_detach_20260625_015112`
+
+### Modified Files
+
+- `F:\GoldenAge\fromsoftware-rs\TASK_STATUS.md`
+- `F:\GoldenAge\fromsoftware-rs\PLANS.md`
+- `F:\GoldenAge\fromsoftware-rs\_Project\dynamic-title-bg\PLANS.md`
+- `F:\GoldenAge\fromsoftware-rs\_Project\dynamic-title-bg\TASK_STATUS.md`
+- `F:\GoldenAge\fromsoftware-rs\_Project\dynamic-title-bg\src\bink_probe.rs`
+- `F:\GoldenAge\dll\dynamic_title\dynamic_title_bg.dll`
+
+### Current Judgment
+
+The in-game BK2 skip/end freeze is most likely caused by the previous stop path mutating a shared `CSMovieIns` object after the title BK2 had played. The new build leaves the MovieIns and BinkTexture internals intact and only detaches the title movie from `CSMovieImp+0x40`, which should reduce the chance of corrupting later normal movie playback.
+
+### Unresolved
+
+- Needs user validation:
+  - first title BK2 still plays;
+  - entering gameplay restores normal frame rate;
+  - other in-game BK2 files can be skipped with Esc or finish naturally without freeze/crash.
+- If gameplay frame rate stays locked to 30, clearing only `CSMovieImp+0x40` is not enough and a different non-destructive stop signal is needed.
+- Returning from gameplay to title remains the stable fallback behavior: static last video frame, not dynamic replay.
+
+### Next Step
+
+Test the new deployed DLL in ER. If an in-game BK2 still crashes on skip/end, enable `log_enabled=true`, reproduce once, and inspect whether the crash happens before or after the title detach line.
+
+## 2026-06-25 02:01 CST - Stop Title Movie Without Re-arm Test Build
+
+### Completed
+
+- User validated the non-destructive detach build and found it was too light:
+  - title BK2 kept playing after returning to title;
+  - gameplay remained locked to 30 fps;
+  - other in-game BK2 playback became the title movie.
+- Updated `PLANS.md` with the follow-up stop-without-rearm plan before editing.
+- Changed gameplay stop behavior again:
+  - calls the title BinkTexture close vtable;
+  - clears the title `CSMovieIns` BinkTexture pointer at `+0xB8`;
+  - clears the title active/open flag at `+0x130`;
+  - clears `CSMovieImp+0x40` only if it still points to the tracked title MovieIns;
+  - still does not clear `CSMovieIns+0x40/+0x44`, to avoid corrupting the state machine for later in-game BK2 skip/end.
+- Prevented return-to-title re-play by no longer resetting `MOVIE_IMP_TRIGGER_STARTED` after a successful title stop.
+- Added `freeze_bink_bridge_after_title_stop()`:
+  - disables Bink source capture;
+  - keeps the last stored Bink/video source for the static video-frame fallback;
+  - keeps the title target callback marked fired so it cannot restart native BK2 later in the same process.
+- Removed the old unused reset function.
+- Ran `cargo fmt`.
+- Built successfully with `cargo build --release --offline` and no warnings.
+- Deployed rebuilt DLL to:
+  - `F:\GoldenAge\dll\dynamic_title\dynamic_title_bg.dll`
+- Backed up the previous deployed DLL with suffix:
+  - `.before_title_stop_no_rearm_20260625_020055`
+
+### Modified Files
+
+- `F:\GoldenAge\fromsoftware-rs\_Project\dynamic-title-bg\PLANS.md`
+- `F:\GoldenAge\fromsoftware-rs\_Project\dynamic-title-bg\TASK_STATUS.md`
+- `F:\GoldenAge\fromsoftware-rs\_Project\dynamic-title-bg\src\bink_probe.rs`
+- `F:\GoldenAge\fromsoftware-rs\_Project\dynamic-title-bg\src\dx12_title_texture.rs`
+- `F:\GoldenAge\dll\dynamic_title\dynamic_title_bg.dll`
+
+### Current Judgment
+
+The correct middle ground is likely to release the title BK2 resource and active flag, but preserve the MovieIns state-machine fields. This should restore gameplay FPS and stop later movies from inheriting the title BK2, while avoiding the previous crash risk caused by clearing `+0x40/+0x44`.
+
+### Unresolved
+
+- Needs user validation:
+  - first title BK2 plays;
+  - gameplay is no longer 30 fps after entering the game;
+  - returning to title does not restart BK2 and remains a static video frame;
+  - other in-game BK2 files play normally and can be skipped/end without freeze or crash.
+- If in-game BK2 still crashes on skip/end, the inner close itself may be unsafe and a more official MovieIns stop/reset function must be found.
+
+### Next Step
+
+Test the new deployed DLL. If the only remaining failure is in-game BK2 skip/end crash, enable logging and capture whether `title inner close returned` appears before the later crash.
+
+## 2026-06-25 02:05 CST - Stop Without Re-arm Validation
+
+### Completed
+
+- User tested the `before_title_stop_no_rearm` follow-up build and reported it appears to work.
+- Current validated behavior:
+  - first title/main menu BK2 plays;
+  - entering gameplay no longer leaves the game locked to 30 fps;
+  - returning to title no longer restarts native BK2 playback;
+  - later in-game BK2 playback is no longer replaced by the title movie.
+
+### Modified Files
+
+- `F:\GoldenAge\fromsoftware-rs\_Project\dynamic-title-bg\TASK_STATUS.md`
+
+### Current Judgment
+
+This is the best current stable lifecycle model: stop the title movie's Bink resource and active flag on gameplay entry, but preserve the MovieIns state-machine fields. It fixes the 30 fps persistence and title-movie contamination without reintroducing the earlier obvious crash path from clearing `+0x40/+0x44`.
+
+### Unresolved
+
+- Needs a little more soak testing around rare in-game BK2 skip/end cases.
+- True dynamic replay after returning to title remains intentionally disabled; the stable fallback is static last video frame.
+
+### Next Step
+
+If further testing remains clean, commit and push this lifecycle fix to GitHub and update the release notes.

@@ -694,3 +694,33 @@ The desired stable behavior is not original dummy fallback. It should keep the l
 3. Do not clear the stored Bink RGB source and do not restore the original `MENU_DummyMovie` dummy descriptor.
 4. Leave the title descriptor bound to the last successful Bink RGB source so the title shows a static video frame after returning from gameplay.
 5. Build, deploy to `F:\GoldenAge\dll\dynamic_title`, clear log, and update `TASK_STATUS.md`.
+
+## Active Plan: Non-destructive MovieImp Detach
+
+The current gameplay FPS restore path is too destructive for shared MovieIns state: it calls the inner BinkTexture close method and clears fields inside `CSMovieIns`. Other in-game BK2 playback likely reuses the same `CSMovieIns`, so skipping or finishing later movies can crash when the engine sees the mutated state.
+
+1. Keep the title `MENU_DummyMovie` SRV bridge and freeze-last-video-frame behavior.
+2. Replace the destructive close path with a non-destructive detach path:
+   - do not call the inner BinkTexture close vtable;
+   - do not clear `MovieIns+0xB8`, `+0x130`, `+0x40`, or `+0x44`;
+   - only clear `CSMovieImp+0x40` if it still points to the tracked title `MovieIns`.
+3. Disable the return re-arm monitor for the stable baseline, since true replay after returning to title is unresolved and repeated MovieImp setup can interfere with later movie playback.
+4. Keep `reset_bink_bridge_cycle()` so title descriptors retain the last Bink/video frame and source capture is disabled after leaving title.
+5. Build and deploy to `F:\GoldenAge\dll\dynamic_title`, then test:
+   - first title still plays;
+   - gameplay FPS returns;
+   - in-game BK2 can be skipped or can end without freeze/crash.
+
+### Follow-up Adjustment: Stop Title Movie Without Re-arming
+
+The non-destructive detach test was too light: the native title movie kept ticking, so gameplay stayed locked to 30 fps, returning to title replayed the BK2, and later in-game BK2 playback reused/overlapped the title movie.
+
+1. Keep avoiding the dangerous state-machine writes to `CSMovieIns+0x40/+0x44`.
+2. On gameplay entry, stop only the title movie resources:
+   - call the inner BinkTexture close vtable;
+   - clear the title `CSMovieIns` BinkTexture pointer;
+   - clear the title active/open flag at `+0x130`;
+   - clear `CSMovieImp+0x40` if it still points to the title MovieIns.
+3. Do not reset `MOVIE_IMP_TRIGGER_STARTED` after the stop, so the title target callback cannot restart native BK2 when returning to the title menu in the same process.
+4. Add a bridge reset variant that freezes the last video frame and keeps the title callback marked fired.
+5. Build, deploy, and retest gameplay FPS plus in-game BK2 skip/end behavior.
