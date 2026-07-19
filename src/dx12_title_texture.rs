@@ -61,6 +61,7 @@ static DYNAMIC_TEXTURE: Mutex<Option<DynamicTexture>> = Mutex::new(None);
 static ATLAS_SETTINGS: OnceLock<AtlasSettings> = OnceLock::new();
 static TITLE_TARGET_CALLBACK: OnceLock<Box<dyn Fn() + Send + Sync>> = OnceLock::new();
 static TITLE_TARGET_CALLBACK_FIRED: AtomicUsize = AtomicUsize::new(0);
+static TITLE_MOVIE_PERMANENTLY_DISABLED: AtomicUsize = AtomicUsize::new(0);
 
 fn encode_shader_4_component_mapping(src0: u32, src1: u32, src2: u32, src3: u32) -> u32 {
     (src0 & 0x7) | ((src1 & 0x7) << 3) | ((src2 & 0x7) << 6) | ((src3 & 0x7) << 9) | (1 << 12)
@@ -251,7 +252,28 @@ pub(crate) fn freeze_bink_bridge_after_title_stop(reason: &str) {
     ));
 }
 
+pub(crate) fn permanently_disable_title_movie_bridge(reason: &str) {
+    if TITLE_MOVIE_PERMANENTLY_DISABLED.swap(1, Ordering::AcqRel) != 0 {
+        return;
+    }
+    BINK_SOURCE_CAPTURE_ENABLED.store(0, Ordering::Release);
+    BINK_PLANE_MATCH_COUNT.store(0, Ordering::Release);
+    TITLE_TARGET_CALLBACK_FIRED.store(1, Ordering::Release);
+
+    let preserved_source = STORED_BINK_PLANE
+        .lock()
+        .map(|source| source.is_some())
+        .unwrap_or(false);
+    TITLE_MATCH_COUNT.store(0, Ordering::Release);
+    append_log(&format!(
+        "dx12 title texture probe: permanently disabled title bridge reason={reason} preserved_frozen_source={preserved_source}"
+    ));
+}
+
 pub(crate) fn enable_bink_bridge_source_capture(reason: &str) {
+    if TITLE_MOVIE_PERMANENTLY_DISABLED.load(Ordering::Acquire) != 0 {
+        return;
+    }
     BINK_SOURCE_CAPTURE_ENABLED.store(1, Ordering::Release);
     if let Ok(mut source) = STORED_BINK_PLANE.lock() {
         *source = None;
@@ -378,12 +400,12 @@ fn inspect_srv(
         require_bc7,
     ) {
         let title_index = TITLE_MATCH_COUNT.fetch_add(1, Ordering::Relaxed) + 1;
-        if settings
+        let is_bink_title_target = settings
             .map(|settings| {
                 settings.bink_plane_hijack && settings.bink_plane_target_title_index == title_index
             })
-            .unwrap_or(false)
-        {
+            .unwrap_or(false);
+        if is_bink_title_target {
             STORED_TITLE_DESCRIPTOR.store(descriptor, Ordering::Release);
             append_log(&format!(
                 "dx12 title texture probe: stored title descriptor title_index=#{title_index} descriptor=0x{descriptor:X} resource={resource:p}"
@@ -424,6 +446,9 @@ fn inspect_srv(
 }
 
 fn fire_title_target_callback_once() {
+    if TITLE_MOVIE_PERMANENTLY_DISABLED.load(Ordering::Acquire) != 0 {
+        return;
+    }
     if TITLE_TARGET_CALLBACK_FIRED.swap(1, Ordering::AcqRel) != 0 {
         return;
     }

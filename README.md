@@ -5,6 +5,15 @@ Restores an Elden Ring title-screen BK2 background by combining two engine paths
 1. Start playback through ER's native `CSMovieImp` / `CSMovieIns` movie path.
 2. Bridge the native Bink RGB SRV into the visible `MENU_DummyMovie` GFX descriptor.
 
+The title movie is intentionally one-shot. After the first confirmed gameplay
+cleanup, the DLL permanently stops interacting with later movies. The captured
+title texture is retained as a frozen frame so it is not released beside the
+next native CG. Returning to the title screen keeps the normal logo/menu UI
+over that frozen frame; the title BK2 does not restart.
+
+Normal title playback does not install the diagnostic `CSMovieIns` init probe
+or the removed global MovieIns setup/init handoff hooks.
+
 The verified title-menu target is:
 
 - `MENU_DummyMovie.dds`
