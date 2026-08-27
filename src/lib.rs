@@ -29,6 +29,14 @@ pub unsafe extern "C" fn DllMain(hmodule: HINSTANCE, reason: u32, _: *mut c_void
         let hmodule = HINSTANCE(hmodule_raw as *mut _);
         let config = Config::load(hmodule);
         append_log_path(config.log_path.as_ref(), "DLL_PROCESS_ATTACH");
+        let er_native_compatible = if config.movie_imp_trigger {
+            bink_probe::validate_er_runtime(config.log_path.clone())
+        } else {
+            true
+        };
+        let movie_imp_trigger = config.movie_imp_trigger && er_native_compatible;
+        let bink_plane_hijack =
+            config.bink_plane_hijack && (!config.movie_imp_trigger || er_native_compatible);
 
         if config.probe_bink_open {
             bink_probe::install_async(
@@ -77,7 +85,7 @@ pub unsafe extern "C" fn DllMain(hmodule: HINSTANCE, reason: u32, _: *mut c_void
         if config.probe_staffroll_ctor {
             bink_probe::install_staffroll_ctor_probe(config.log_path.clone());
         }
-        if config.movie_imp_trigger && !config.movie_imp_trigger_on_title_target {
+        if movie_imp_trigger && !config.movie_imp_trigger_on_title_target {
             bink_probe::configure_movie_imp_stop_monitor(
                 config.log_path.clone(),
                 config.movie_imp_stop_on_gameplay,
@@ -98,11 +106,11 @@ pub unsafe extern "C" fn DllMain(hmodule: HINSTANCE, reason: u32, _: *mut c_void
 
         if config.probe_title_srv
             || config.enable_title_hijack
-            || config.bink_plane_hijack
-            || (config.movie_imp_trigger && config.movie_imp_trigger_on_title_target)
+            || bink_plane_hijack
+            || (movie_imp_trigger && config.movie_imp_trigger_on_title_target)
         {
             let title_target_callback: Option<Box<dyn Fn() + Send + Sync>> =
-                if config.movie_imp_trigger && config.movie_imp_trigger_on_title_target {
+                if movie_imp_trigger && config.movie_imp_trigger_on_title_target {
                     let log_path = config.log_path.clone();
                     let movie_path = config.movie_imp_path.clone();
                     let delay = config.movie_imp_delay;
@@ -144,9 +152,9 @@ pub unsafe extern "C" fn DllMain(hmodule: HINSTANCE, reason: u32, _: *mut c_void
                 config.hijack_resource_width,
                 config.hijack_resource_height,
                 config.hijack_require_bc7,
-                (config.probe_title_srv || config.bink_plane_hijack) && !config.enable_title_hijack,
+                (config.probe_title_srv || bink_plane_hijack) && !config.enable_title_hijack,
                 config.atlas_debug_fill,
-                config.bink_plane_hijack,
+                bink_plane_hijack,
                 config.bink_plane_target_title_index,
                 config.bink_plane_auto_source,
                 config.bink_plane_source_index,

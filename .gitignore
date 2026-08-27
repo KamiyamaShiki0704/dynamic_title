@@ -17,3 +17,6 @@ TASK_STATUS.md
 .vscode/
 .idea/
 *.user
+
+__pycache__/
+*.py[cod]

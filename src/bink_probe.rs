@@ -84,20 +84,8 @@ static LAST_MOVIE_RENDER_RESULT: AtomicUsize = AtomicUsize::new(0);
 static LAST_MOVIE_DRAW_ARG: AtomicUsize = AtomicUsize::new(0);
 static LAST_MOVIE_INNER: AtomicUsize = AtomicUsize::new(0);
 
-const ER_MOVIE_OPEN_WRAPPER_RVA: usize = 0x1E83EE0;
 const NR_BINK_TEXTURE_OPEN_RVA: usize = 0x21152A0;
 const NR_MOVIE_INS_INIT_PLAY_RVA: usize = 0xF6A0E0;
-const ER_MOVIE_INS_SETUP_RVA: usize = 0xE20F90;
-const ER_MOVIE_INS_INIT_PLAY_RVA: usize = 0xE212E0;
-const ER_MOVIE_STATE_STEP_RVA: usize = 0xE20920;
-const ER_MOVIE_STATE0_RVA: usize = 0xE212B0;
-const ER_MOVIE_STATE1_RVA: usize = 0xE21750;
-const ER_MOVIE_RESOURCE_READY_RVA: usize = 0x1EDC930;
-const ER_MOVIE_STATE1_READY_CALLSITE_RVA: usize = 0xE217D7;
-const ER_MOVIE_TICK_RVA: usize = 0xE21B70;
-const ER_MOVIE_RENDER_STATE_RVA: usize = 0xE215C0;
-const ER_MOVIE_DRAW_SUBMIT_RVA: usize = 0x1AEA9A0;
-const ER_STAFFROLL_LAST_SLOT_RVA: usize = 0x746E80;
 const NR_STAFFROLL_MOVIE_STATUS_SLOT_RVA: usize = 0x975A70;
 const NR_STAFFROLL_MOVIE_SLOT_RVA: usize = 0x78FEE0;
 const NR_STAFFROLL_MOVIE_SETUP_RVA: usize = 0x78FA80;
@@ -105,9 +93,7 @@ const NR_STAFFROLL_ONESHOT_LAMBDA_RVA: usize = 0x9764A0;
 const NR_STAFFROLL_SCENE_LAMBDA_A_RVA: usize = 0x9764E0;
 const NR_STAFFROLL_SCENE_LAMBDA_B_RVA: usize = 0x9765F0;
 const NR_STAFFROLL_CTOR_RVA: usize = 0x974E50;
-const ER_STAFFROLL_CTOR_RVA: usize = 0x8BDD60;
 const NR_CS_MOVIE_IMP_GLOBAL_RVA: usize = 0x442E0A8;
-const ER_CS_MOVIE_IMP_GLOBAL_RVA: usize = 0x45878A8;
 const CS_MOVIE_IMP_MOVIE_INS_OFFSET: usize = 0x38;
 const NR_STAFFROLL_SLOT00_RVA: usize = 0x7783B0;
 const NR_STAFFROLL_SLOT01_RVA: usize = 0x9757B0;
@@ -128,6 +114,84 @@ const NR_STAFFROLL_SLOT15_RVA: usize = 0x78EA60;
 const NR_STAFFROLL_SLOT16_RVA: usize = 0x78DEA0;
 const NR_STAFFROLL_SLOT17_RVA: usize = 0x78FEE0;
 
+#[derive(Clone, Copy)]
+struct ErRuntimeLayout {
+    name: &'static str,
+    movie_open_wrapper_rva: usize,
+    movie_ins_setup_rva: usize,
+    movie_ins_init_play_rva: usize,
+    movie_state_step_rva: usize,
+    movie_state0_rva: usize,
+    movie_state1_rva: usize,
+    movie_resource_ready_rva: usize,
+    movie_state1_ready_callsite_rva: usize,
+    movie_tick_rva: usize,
+    movie_render_state_rva: usize,
+    movie_draw_submit_rva: usize,
+    staffroll_last_slot_rva: usize,
+    staffroll_ctor_rva: usize,
+    cs_movie_imp_global_rva: usize,
+    movie_cleanup_state7_rva: usize,
+    movie_imp_init_store_rva: usize,
+}
+
+const ER_WW_262_LAYOUT: ErRuntimeLayout = ErRuntimeLayout {
+    name: "ER 2.6.2.0",
+    movie_open_wrapper_rva: 0x1E83EE0,
+    movie_ins_setup_rva: 0xE20F90,
+    movie_ins_init_play_rva: 0xE212E0,
+    movie_state_step_rva: 0xE20920,
+    movie_state0_rva: 0xE212B0,
+    movie_state1_rva: 0xE21750,
+    movie_resource_ready_rva: 0x1EDC930,
+    movie_state1_ready_callsite_rva: 0xE217D7,
+    movie_tick_rva: 0xE21B70,
+    movie_render_state_rva: 0xE215C0,
+    movie_draw_submit_rva: 0x1AEA9A0,
+    staffroll_last_slot_rva: 0x746E80,
+    staffroll_ctor_rva: 0x8BDD60,
+    cs_movie_imp_global_rva: 0x45878A8,
+    movie_cleanup_state7_rva: 0xE21090,
+    movie_imp_init_store_rva: 0xDEFBBD,
+};
+
+const ER_WW_270_LAYOUT: ErRuntimeLayout = ErRuntimeLayout {
+    name: "ER 2.7.0.0",
+    movie_open_wrapper_rva: 0x1E85CE0,
+    movie_ins_setup_rva: 0xE22D90,
+    movie_ins_init_play_rva: 0xE230E0,
+    movie_state_step_rva: 0xE22720,
+    movie_state0_rva: 0xE230B0,
+    movie_state1_rva: 0xE23550,
+    movie_resource_ready_rva: 0x1EDE730,
+    movie_state1_ready_callsite_rva: 0xE235D7,
+    movie_tick_rva: 0xE23970,
+    movie_render_state_rva: 0xE233C0,
+    movie_draw_submit_rva: 0x1AEC7A0,
+    staffroll_last_slot_rva: 0x747CD0,
+    staffroll_ctor_rva: 0x8BEF00,
+    cs_movie_imp_global_rva: 0x458B928,
+    movie_cleanup_state7_rva: 0xE22E90,
+    movie_imp_init_store_rva: 0xDF19BD,
+};
+
+const ER_MOVIE_SETUP_SIGNATURE: &[u8] = &[
+    0x48, 0x89, 0x5C, 0x24, 0x08, 0x57, 0x48, 0x83, 0xEC, 0x30, 0x80, 0xB9, 0x30, 0x01, 0x00, 0x00,
+    0x00, 0x49, 0x8B, 0xC0, 0x0F, 0x29, 0x74, 0x24, 0x20, 0x0F, 0xB6, 0xFA, 0x0F, 0x28, 0xF3, 0x48,
+    0x8B, 0xD9, 0x0F, 0x85, 0x85, 0x00, 0x00, 0x00, 0x48, 0x81, 0xC1, 0xC0, 0x00, 0x00, 0x00, 0x66,
+];
+const ER_MOVIE_CLEANUP_SIGNATURE: &[u8] = &[
+    0x40, 0x53, 0x48, 0x83, 0xEC, 0x20, 0x48, 0x8B, 0xD9, 0x33, 0xD2, 0x48, 0x8B, 0x89, 0xA8, 0x00,
+    0x00, 0x00, 0xE8, 0x59, 0xE8, 0xFF, 0xFF, 0x48, 0x8B, 0x8B, 0xB8, 0x00, 0x00, 0x00, 0x48, 0x85,
+    0xC9, 0x74, 0x06, 0x48, 0x8B, 0x01, 0xFF, 0x50, 0x48,
+];
+const ER_MOVIE_STATE_LAYOUT_SIGNATURE: &[u8] = &[
+    0x48, 0x63, 0x43, 0x44, 0x89, 0x43, 0x40, 0x4C, 0x39, 0x73, 0x58,
+];
+
+static ER_RUNTIME_LAYOUT: OnceLock<Option<ErRuntimeLayout>> = OnceLock::new();
+static ER_COMPATIBILITY_LOGGED: AtomicUsize = AtomicUsize::new(0);
+
 #[derive(Clone)]
 pub(crate) struct BinkReplaceRule {
     pub(crate) from_contains: String,
@@ -142,6 +206,87 @@ struct MovieImpTriggerSettings {
     present: u8,
     unknown: u8,
     option: u32,
+}
+
+pub(crate) fn validate_er_runtime(log_path: Option<PathBuf>) -> bool {
+    if let Some(path) = log_path {
+        let _ = LOG_PATH.set(path);
+    }
+    let Some(layout) = er_runtime_layout() else {
+        if ER_COMPATIBILITY_LOGGED.swap(1, Ordering::AcqRel) == 0 {
+            append_log(
+                "ER compatibility: unsupported executable; native title movie and Bink bridge hooks are disabled",
+            );
+        }
+        return false;
+    };
+
+    if ER_COMPATIBILITY_LOGGED.swap(1, Ordering::AcqRel) == 0 {
+        append_log(&format!(
+            "ER compatibility: selected {} setup=main.exe+0x{:X} movie_imp_global=main.exe+0x{:X} cleanup_state7=main.exe+0x{:X}",
+            layout.name,
+            layout.movie_ins_setup_rva,
+            layout.cs_movie_imp_global_rva,
+            layout.movie_cleanup_state7_rva,
+        ));
+    }
+    true
+}
+
+fn er_runtime_layout() -> Option<ErRuntimeLayout> {
+    *ER_RUNTIME_LAYOUT.get_or_init(detect_er_runtime_layout)
+}
+
+fn require_er_runtime_layout(context: &str) -> Option<ErRuntimeLayout> {
+    let layout = er_runtime_layout();
+    if layout.is_none() {
+        append_log(&format!(
+            "{context}: skipped because eldenring.exe is not a validated build"
+        ));
+    }
+    layout
+}
+
+fn detect_er_runtime_layout() -> Option<ErRuntimeLayout> {
+    let exe = unsafe { GetModuleHandleA(None) }.ok()?;
+    if !main_module_name(exe).contains("eldenring.exe") {
+        return None;
+    }
+    let base = exe.0 as usize;
+    [ER_WW_270_LAYOUT, ER_WW_262_LAYOUT]
+        .into_iter()
+        .find(|layout| er_runtime_layout_matches(base, *layout))
+}
+
+fn er_runtime_layout_matches(base: usize, layout: ErRuntimeLayout) -> bool {
+    memory_matches(base + layout.movie_ins_setup_rva, ER_MOVIE_SETUP_SIGNATURE)
+        && memory_matches(
+            base + layout.movie_cleanup_state7_rva,
+            ER_MOVIE_CLEANUP_SIGNATURE,
+        )
+        && memory_matches(
+            base + layout.movie_state_step_rva + 0x40,
+            ER_MOVIE_STATE_LAYOUT_SIGNATURE,
+        )
+        && movie_imp_store_targets_global(base, layout)
+}
+
+fn memory_matches(address: usize, expected: &[u8]) -> bool {
+    if !is_readable_memory(address, expected.len()) {
+        return false;
+    }
+    unsafe { std::slice::from_raw_parts(address as *const u8, expected.len()) == expected }
+}
+
+fn movie_imp_store_targets_global(base: usize, layout: ErRuntimeLayout) -> bool {
+    let instruction = base + layout.movie_imp_init_store_rva;
+    if !is_readable_memory(instruction, 7) || !memory_matches(instruction, &[0x48, 0x89, 0x05]) {
+        return false;
+    }
+    let displacement =
+        unsafe { std::ptr::read_unaligned((instruction + 3) as *const i32) } as isize;
+    let target = (instruction + 7).wrapping_add_signed(displacement);
+    target == base + layout.cs_movie_imp_global_rva
 }
 
 pub(crate) fn install_async(log_path: Option<PathBuf>, replace_rule: Option<BinkReplaceRule>) {
@@ -211,10 +356,15 @@ pub(crate) fn install_movie_wrapper_probe(log_path: Option<PathBuf>) {
             append_log("movie wrapper probe: main module unavailable");
             return;
         };
+        let Some(layout) = require_er_runtime_layout("movie wrapper probe") else {
+            return;
+        };
         let base = exe.0 as usize;
-        let addr = base + ER_MOVIE_OPEN_WRAPPER_RVA;
+        let rva = layout.movie_open_wrapper_rva;
+        let addr = base + rva;
         append_log(&format!(
-            "movie wrapper probe: hooking eldenring.exe+0x{ER_MOVIE_OPEN_WRAPPER_RVA:X} addr=0x{addr:X}"
+            "movie wrapper probe: {} hooking eldenring.exe+0x{rva:X} addr=0x{addr:X}",
+            layout.name
         ));
         match unsafe {
             hook_closure_retn(
@@ -276,7 +426,10 @@ pub(crate) fn install_bink_texture_open_probe(
         let rva = if module_name.contains("nightreign.exe") {
             NR_BINK_TEXTURE_OPEN_RVA
         } else {
-            ER_MOVIE_OPEN_WRAPPER_RVA
+            let Some(layout) = require_er_runtime_layout("bink texture open probe") else {
+                return;
+            };
+            layout.movie_open_wrapper_rva
         };
         let addr = base + rva;
         append_log(&format!(
@@ -321,7 +474,10 @@ pub(crate) fn install_movie_ins_probe(log_path: Option<PathBuf>) {
         let (rva, layout) = if module_name.contains("nightreign.exe") {
             (NR_MOVIE_INS_INIT_PLAY_RVA, NR_MOVIE_INS_LAYOUT)
         } else {
-            (ER_MOVIE_INS_INIT_PLAY_RVA, ER_MOVIE_INS_LAYOUT)
+            let Some(runtime) = require_er_runtime_layout("movie ins probe") else {
+                return;
+            };
+            (runtime.movie_ins_init_play_rva, ER_MOVIE_INS_LAYOUT)
         };
         let _ = MOVIE_INS_LAYOUT.set(layout);
         let addr = base + rva;
@@ -497,12 +653,16 @@ fn run_er_movie_imp_trigger(
         ));
         return false;
     }
+    let Some(runtime) = require_er_runtime_layout("movie imp trigger") else {
+        return false;
+    };
 
     let base = exe.0 as usize;
-    let global_addr = base + ER_CS_MOVIE_IMP_GLOBAL_RVA;
+    let global_rva = runtime.cs_movie_imp_global_rva;
+    let global_addr = base + global_rva;
     if !is_readable_memory(global_addr, 8) {
         append_log(&format!(
-            "movie imp trigger: global[main.exe+0x{ER_CS_MOVIE_IMP_GLOBAL_RVA:X}] unreadable"
+            "movie imp trigger: global[main.exe+0x{global_rva:X}] unreadable"
         ));
         return false;
     }
@@ -510,7 +670,7 @@ fn run_er_movie_imp_trigger(
     let imp = unsafe { read_usize(global_addr) };
     if imp == 0 || !is_readable_memory(imp + CS_MOVIE_IMP_MOVIE_INS_OFFSET, 8) {
         append_log(&format!(
-            "movie imp trigger: global[main.exe+0x{ER_CS_MOVIE_IMP_GLOBAL_RVA:X}]=0x{imp:X} has no readable CSMovieIns"
+            "movie imp trigger: global[main.exe+0x{global_rva:X}]=0x{imp:X} has no readable CSMovieIns"
         ));
         return false;
     }
@@ -525,12 +685,14 @@ fn run_er_movie_imp_trigger(
 
     let _ = MOVIE_INS_LAYOUT.set(ER_MOVIE_INS_LAYOUT);
     LAST_MOVIE_PARENT.store(movie_ins, Ordering::Release);
+    let setup_rva = runtime.movie_ins_setup_rva;
     append_log(&format!(
-        "movie imp trigger: CSMovieImp=0x{imp:X} CSMovieIns[+38]=0x{movie_ins:X} setup=main.exe+0x{ER_MOVIE_INS_SETUP_RVA:X}"
+        "movie imp trigger: runtime={} CSMovieImp=0x{imp:X} CSMovieIns[+38]=0x{movie_ins:X} setup=main.exe+0x{setup_rva:X}",
+        runtime.name
     ));
     log_movie_ins(0, movie_ins, "trigger-before");
 
-    let setup_addr = base + ER_MOVIE_INS_SETUP_RVA;
+    let setup_addr = base + setup_rva;
     let setup: ErMovieInsSetupFn = unsafe { std::mem::transmute(setup_addr) };
     let wide_path = path
         .encode_utf16()
@@ -596,10 +758,14 @@ pub(crate) fn install_movie_step_probe(log_path: Option<PathBuf>) {
             append_log("movie step probe: main module unavailable");
             return;
         };
+        let Some(layout) = require_er_runtime_layout("movie step probe") else {
+            return;
+        };
         let base = exe.0 as usize;
-        let addr = base + ER_MOVIE_STATE_STEP_RVA;
+        let state_step_rva = layout.movie_state_step_rva;
+        let addr = base + state_step_rva;
         append_log(&format!(
-            "movie step probe: hooking eldenring.exe+0x{ER_MOVIE_STATE_STEP_RVA:X} addr=0x{addr:X}"
+            "movie step probe: hooking eldenring.exe+0x{state_step_rva:X} addr=0x{addr:X}"
         ));
         match unsafe {
             hook_closure_retn(
@@ -619,9 +785,10 @@ pub(crate) fn install_movie_step_probe(log_path: Option<PathBuf>) {
             }
         }
 
-        let state0_addr = base + ER_MOVIE_STATE0_RVA;
+        let state0_rva = layout.movie_state0_rva;
+        let state0_addr = base + state0_rva;
         append_log(&format!(
-            "movie state probe: hooking state0 eldenring.exe+0x{ER_MOVIE_STATE0_RVA:X} addr=0x{state0_addr:X}"
+            "movie state probe: hooking state0 eldenring.exe+0x{state0_rva:X} addr=0x{state0_addr:X}"
         ));
         match unsafe {
             hook_closure_retn(
@@ -640,9 +807,10 @@ pub(crate) fn install_movie_step_probe(log_path: Option<PathBuf>) {
             }
         }
 
-        let state1_addr = base + ER_MOVIE_STATE1_RVA;
+        let state1_rva = layout.movie_state1_rva;
+        let state1_addr = base + state1_rva;
         append_log(&format!(
-            "movie state probe: hooking state1 eldenring.exe+0x{ER_MOVIE_STATE1_RVA:X} addr=0x{state1_addr:X}"
+            "movie state probe: hooking state1 eldenring.exe+0x{state1_rva:X} addr=0x{state1_addr:X}"
         ));
         match unsafe {
             hook_closure_retn(
@@ -661,9 +829,10 @@ pub(crate) fn install_movie_step_probe(log_path: Option<PathBuf>) {
             }
         }
 
-        let ready_addr = base + ER_MOVIE_RESOURCE_READY_RVA;
+        let resource_ready_rva = layout.movie_resource_ready_rva;
+        let ready_addr = base + resource_ready_rva;
         append_log(&format!(
-            "movie resource ready probe: hooking eldenring.exe+0x{ER_MOVIE_RESOURCE_READY_RVA:X} addr=0x{ready_addr:X}"
+            "movie resource ready probe: hooking eldenring.exe+0x{resource_ready_rva:X} addr=0x{ready_addr:X}"
         ));
         match unsafe {
             hook_closure_retn(
@@ -699,10 +868,14 @@ pub(crate) fn install_movie_tick_probe(log_path: Option<PathBuf>) {
             append_log("movie tick probe: main module unavailable");
             return;
         };
+        let Some(layout) = require_er_runtime_layout("movie tick probe") else {
+            return;
+        };
         let base = exe.0 as usize;
-        let addr = base + ER_MOVIE_TICK_RVA;
+        let tick_rva = layout.movie_tick_rva;
+        let addr = base + tick_rva;
         append_log(&format!(
-            "movie tick probe: hooking eldenring.exe+0x{ER_MOVIE_TICK_RVA:X} addr=0x{addr:X}"
+            "movie tick probe: hooking eldenring.exe+0x{tick_rva:X} addr=0x{addr:X}"
         ));
         match unsafe {
             hook_closure_retn(
@@ -729,8 +902,11 @@ pub(crate) fn install_movie_render_probe(log_path: Option<PathBuf>) {
         let _ = LOG_PATH.set(path);
     }
     MOVIE_RENDER_PROBE_ENABLED.store(1, Ordering::Release);
+    let Some(layout) = require_er_runtime_layout("movie render probe") else {
+        return;
+    };
     install_rva_hook_once(
-        ER_MOVIE_RENDER_STATE_RVA,
+        layout.movie_render_state_rva,
         "movie render probe",
         &MOVIE_RENDER_HOOK_INSTALLED,
         movie_render_hook,
@@ -741,8 +917,11 @@ pub(crate) fn install_movie_draw_submit_probe(log_path: Option<PathBuf>) {
     if let Some(path) = log_path {
         let _ = LOG_PATH.set(path);
     }
+    let Some(layout) = require_er_runtime_layout("movie draw submit probe") else {
+        return;
+    };
     install_rva_hook_once(
-        ER_MOVIE_DRAW_SUBMIT_RVA,
+        layout.movie_draw_submit_rva,
         "movie draw submit probe",
         &MOVIE_DRAW_SUBMIT_HOOK_INSTALLED,
         movie_draw_submit_hook,
@@ -812,9 +991,12 @@ pub(crate) fn install_staffroll_screen_probe(log_path: Option<PathBuf>, broad: b
             append_log(
                 "staffroll screen probe: installing Elden Ring StaffRollScreen last-slot probe",
             );
+            let Some(layout) = require_er_runtime_layout("staffroll screen probe") else {
+                return;
+            };
             install_rva_hook_once_now(
                 exe,
-                ER_STAFFROLL_LAST_SLOT_RVA,
+                layout.staffroll_last_slot_rva,
                 "staffroll screen probe: ER last slot",
                 &STAFFROLL_SLOT_HOOK_INSTALLED,
                 staffroll_slot_hook,
@@ -840,8 +1022,11 @@ pub(crate) fn install_staffroll_ctor_probe(log_path: Option<PathBuf>) {
                 "staffroll ctor probe: NR StaffRollScreen ctor",
             )
         } else {
+            let Some(layout) = require_er_runtime_layout("staffroll ctor probe") else {
+                return;
+            };
             (
-                ER_STAFFROLL_CTOR_RVA,
+                layout.staffroll_ctor_rva,
                 "staffroll ctor probe: ER StaffRollScreen ctor",
             )
         };
@@ -1477,7 +1662,9 @@ fn movie_resource_ready_hook(registers: *mut Registers, original: usize) -> usiz
     let rdx = registers.rdx as usize;
     let r8 = registers.r8 as usize;
     let r9 = registers.r9 as usize;
-    let matches_state1 = caller_main_rva(caller) == Some(ER_MOVIE_STATE1_READY_CALLSITE_RVA);
+    let matches_state1 = er_runtime_layout()
+        .map(|layout| caller_main_rva(caller) == Some(layout.movie_state1_ready_callsite_rva))
+        .unwrap_or(false);
 
     let original: Probe4Fn = unsafe { std::mem::transmute(original) };
     let result = unsafe { original(rcx, rdx, r8, r9) };
@@ -2521,8 +2708,14 @@ fn log_movie_imp_owner(count: usize, movie_ins: usize, phase: &str, layout: Movi
     let base = exe.0 as usize;
     let global_rva = if layout.name == "NR" {
         NR_CS_MOVIE_IMP_GLOBAL_RVA
+    } else if let Some(runtime) = er_runtime_layout() {
+        runtime.cs_movie_imp_global_rva
     } else {
-        ER_CS_MOVIE_IMP_GLOBAL_RVA
+        append_log(&format!(
+            "movie ins probe: {phase} #{count} movie_imp layout={} unsupported ER executable",
+            layout.name
+        ));
+        return;
     };
     let global_addr = base + global_rva;
     let imp = unsafe { read_usize(global_addr) };

@@ -21,17 +21,43 @@ The verified title-menu target is:
 - `DXGI_FORMAT(98)`
 - title descriptor index `1`
 
+## Game Compatibility
+
+The native title-movie path is currently validated for these Worldwide PC
+executables:
+
+- Elden Ring `2.6.2.0`
+- Elden Ring `2.7.0.0`
+
+At startup, the DLL validates the native `CSMovieIns` setup and cleanup code,
+the movie-state layout, and the `CSMovieImp` global reference before enabling
+the title movie pipeline. An unknown executable is treated as unsupported: the
+native title movie and Bink bridge are left disabled instead of hooking
+unverified addresses.
+
+The standalone compatibility checker can validate an executable without
+launching the game:
+
+```powershell
+py -3 .\_Tools\compat\check_er_compat.py "C:\path\to\ELDEN RING\Game\eldenring.exe"
+```
+
 ## Build
 
 ```powershell
-cd F:\GoldenAge\fromsoftware-rs\_Project\dynamic-title-bg
+cd C:\path\to\dynamic-title-bg
 cargo build --release --offline
 ```
+
+The project expects the matching `fromsoftware-rs-0.14.0` source tree at the
+relative path declared in `Cargo.toml`. This source includes the loading-screen
+helpers used by the title lifecycle and is newer than the crates.io `0.14.0`
+package contents.
 
 ## Deploy
 
 ```powershell
-Copy-Item -LiteralPath .\target\release\dynamic_title_bg.dll -Destination F:\GoldenAge\dll\dynamic_title_bg\dynamic_title_bg.dll -Force
+Copy-Item -LiteralPath .\target\release\dynamic_title_bg.dll -Destination C:\path\to\your\mod-loader\dynamic_title_bg.dll -Force
 ```
 
 ## Config
