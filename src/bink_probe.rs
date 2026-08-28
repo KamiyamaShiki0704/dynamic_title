@@ -114,6 +114,10 @@ const NR_STAFFROLL_SLOT15_RVA: usize = 0x78EA60;
 const NR_STAFFROLL_SLOT16_RVA: usize = 0x78DEA0;
 const NR_STAFFROLL_SLOT17_RVA: usize = 0x78FEE0;
 
+const ER_MENU_LOADING_TIMER_OFFSET: usize = 0x734;
+const ER_NOW_LOADING_FLAGS_OFFSET: usize = 0xEC;
+const ER_NOW_LOADING_FLAGS_LEN: usize = 4;
+
 #[derive(Clone, Copy)]
 struct ErRuntimeLayout {
     name: &'static str,
@@ -1944,19 +1948,83 @@ impl TitleGateSnapshot {
 }
 
 fn loading_screen_active() -> Option<bool> {
-    let menu_loading = unsafe { CSMenuManImp::instance() }.ok().map(|menu_man| {
-        let timer = menu_man.loading_screen_data.timer;
-        timer.is_finite() && timer > 0.25
-    });
+    let menu_loading = unsafe { CSMenuManImp::instance() }
+        .ok()
+        .and_then(|menu_man| {
+            read_f32_field(
+                menu_man as *const CSMenuManImp as usize,
+                ER_MENU_LOADING_TIMER_OFFSET,
+            )
+        })
+        .map(|timer| timer.is_finite() && timer > 0.25);
     let now_loading = unsafe { CSNowLoadingHelper::instance() }
         .ok()
-        .map(|helper| helper.is_loading_screen_active());
+        .and_then(|helper| {
+            any_nonzero_bytes(
+                helper as *const CSNowLoadingHelper as usize,
+                ER_NOW_LOADING_FLAGS_OFFSET,
+                ER_NOW_LOADING_FLAGS_LEN,
+            )
+        });
 
     match (menu_loading, now_loading) {
         (Some(a), Some(b)) => Some(a || b),
         (Some(a), None) => Some(a),
         (None, Some(b)) => Some(b),
         (None, None) => None,
+    }
+}
+
+fn read_f32_field(base: usize, offset: usize) -> Option<f32> {
+    let address = base.checked_add(offset)?;
+    if !is_readable_memory(address, std::mem::size_of::<f32>()) {
+        return None;
+    }
+    Some(unsafe { std::ptr::read_unaligned(address as *const f32) })
+}
+
+fn any_nonzero_bytes(base: usize, offset: usize, len: usize) -> Option<bool> {
+    let address = base.checked_add(offset)?;
+    if !is_readable_memory(address, len) {
+        return None;
+    }
+    let values = unsafe { std::slice::from_raw_parts(address as *const u8, len) };
+    Some(values.iter().any(|value| *value != 0))
+}
+
+#[cfg(test)]
+mod loading_state_tests {
+    use super::*;
+
+    #[test]
+    fn pinned_types_cover_loading_state_offsets() {
+        assert!(
+            std::mem::size_of::<CSMenuManImp>()
+                >= ER_MENU_LOADING_TIMER_OFFSET + std::mem::size_of::<f32>()
+        );
+        assert!(
+            std::mem::size_of::<CSNowLoadingHelper>()
+                >= ER_NOW_LOADING_FLAGS_OFFSET + ER_NOW_LOADING_FLAGS_LEN
+        );
+    }
+
+    #[test]
+    fn guarded_loading_state_reads_local_memory() {
+        let timer = 0.5_f32;
+        let timer_base = &timer as *const f32 as usize;
+        assert_eq!(read_f32_field(timer_base, 0), Some(timer));
+
+        let inactive = [0_u8; ER_NOW_LOADING_FLAGS_LEN];
+        let active = [0_u8, 1, 0, 0];
+        assert_eq!(
+            any_nonzero_bytes(inactive.as_ptr() as usize, 0, inactive.len()),
+            Some(false)
+        );
+        assert_eq!(
+            any_nonzero_bytes(active.as_ptr() as usize, 0, active.len()),
+            Some(true)
+        );
+        assert_eq!(read_f32_field(usize::MAX, 1), None);
     }
 }
 

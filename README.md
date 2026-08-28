@@ -46,13 +46,13 @@ py -3 .\_Tools\compat\check_er_compat.py "C:\path\to\ELDEN RING\Game\eldenring.e
 
 ```powershell
 cd C:\path\to\dynamic-title-bg
-cargo build --release --offline
+cargo build --release
 ```
 
-The project expects the matching `fromsoftware-rs-0.14.0` source tree at the
-relative path declared in `Cargo.toml`. This source includes the loading-screen
-helpers used by the title lifecycle and is newer than the crates.io `0.14.0`
-package contents.
+`Cargo.toml` pins `eldenring` and `fromsoftware-shared` to the same exact
+official `vswarte/eldenring-rs` Git revision. No sibling fsrs checkout is
+required. After Cargo has fetched the pinned revision once, subsequent builds
+can use `cargo build --release --offline`.
 
 ## Deploy
 
