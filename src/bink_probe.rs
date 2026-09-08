@@ -179,6 +179,26 @@ const ER_WW_270_LAYOUT: ErRuntimeLayout = ErRuntimeLayout {
     movie_imp_init_store_rva: 0xDF19BD,
 };
 
+const ER_WW_271_LAYOUT: ErRuntimeLayout = ErRuntimeLayout {
+    name: "ER 2.7.1.0",
+    movie_open_wrapper_rva: 0x1E85D50,
+    movie_ins_setup_rva: 0xE22E00,
+    movie_ins_init_play_rva: 0xE23150,
+    movie_state_step_rva: 0xE22790,
+    movie_state0_rva: 0xE23120,
+    movie_state1_rva: 0xE235C0,
+    movie_resource_ready_rva: 0x1EDE7A0,
+    movie_state1_ready_callsite_rva: 0xE23647,
+    movie_tick_rva: 0xE239E0,
+    movie_render_state_rva: 0xE23430,
+    movie_draw_submit_rva: 0x1AEC810,
+    staffroll_last_slot_rva: 0x747CD0,
+    staffroll_ctor_rva: 0x8BEF00,
+    cs_movie_imp_global_rva: 0x458B928,
+    movie_cleanup_state7_rva: 0xE22F00,
+    movie_imp_init_store_rva: 0xDF1A2D,
+};
+
 const ER_MOVIE_SETUP_SIGNATURE: &[u8] = &[
     0x48, 0x89, 0x5C, 0x24, 0x08, 0x57, 0x48, 0x83, 0xEC, 0x30, 0x80, 0xB9, 0x30, 0x01, 0x00, 0x00,
     0x00, 0x49, 0x8B, 0xC0, 0x0F, 0x29, 0x74, 0x24, 0x20, 0x0F, 0xB6, 0xFA, 0x0F, 0x28, 0xF3, 0x48,
@@ -257,7 +277,7 @@ fn detect_er_runtime_layout() -> Option<ErRuntimeLayout> {
         return None;
     }
     let base = exe.0 as usize;
-    [ER_WW_270_LAYOUT, ER_WW_262_LAYOUT]
+    [ER_WW_271_LAYOUT, ER_WW_270_LAYOUT, ER_WW_262_LAYOUT]
         .into_iter()
         .find(|layout| er_runtime_layout_matches(base, *layout))
 }

@@ -28,6 +28,8 @@ executables:
 
 - Elden Ring `2.6.2.0`
 - Elden Ring `2.7.0.0`
+- Elden Ring `2.7.1.0` (game version `1.17.1`; static validation complete,
+  in-game verification pending)
 
 At startup, the DLL validates the native `CSMovieIns` setup and cleanup code,
 the movie-state layout, and the `CSMovieImp` global reference before enabling

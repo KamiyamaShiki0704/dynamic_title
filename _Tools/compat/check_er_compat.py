@@ -57,6 +57,29 @@ def diagnostics(rvas: tuple[int, ...]) -> tuple[tuple[str, int, bytes], ...]:
 
 LAYOUTS = (
     Layout(
+        name="ER 2.7.1.0 (1.17.1)",
+        sha256="1A3547101327F65D0C76DA2F9190AC0AA66871EA42BAE2AECC61E11A8B597891",
+        setup_rva=0xE22E00,
+        movie_imp_global_rva=0x458B928,
+        state_step_rva=0xE22790,
+        cleanup_state7_rva=0xE22F00,
+        movie_imp_store_rva=0xDF1A2D,
+        diagnostics=diagnostics(
+            (
+                0x1E85D50,
+                0xE23150,
+                0xE23120,
+                0xE235C0,
+                0x1EDE7A0,
+                0xE239E0,
+                0xE23430,
+                0x1AEC810,
+                0x747CD0,
+                0x8BEF00,
+            )
+        ),
+    ),
+    Layout(
         name="ER 2.7.0.0",
         sha256="D1A84083C6C7C7902162FF098F7D86812839AA6B3575959398857E539C488134",
         setup_rva=0xE22D90,
@@ -177,6 +200,17 @@ def layout_errors(image: PeImage, layout: Layout) -> list[str]:
     for name, rva, signature in layout.diagnostics:
         if not matches(image, rva, signature):
             errors.append(f"diagnostic {name} mismatch at 0x{rva:X}")
+
+    targets = {name: rva for name, rva, _ in layout.diagnostics}
+    callsite = targets["movie_state1"] + 0x82
+    try:
+        call = image.read_rva(callsite, 5)
+        if len(call) != 5 or call[0] != 0xE8:
+            errors.append(f"resource-ready call opcode mismatch at 0x{callsite:X}")
+        elif callsite + 5 + struct.unpack_from("<i", call, 1)[0] != targets["movie_resource_ready"]:
+            errors.append(f"resource-ready call target mismatch at 0x{callsite:X}")
+    except ValueError as error:
+        errors.append(str(error))
     return errors
 
 
