@@ -7,8 +7,8 @@ license = "MIT OR Apache-2.0"
 publish = false
 
 [dependencies]
-eldenring = { git = "https://github.com/vswarte/eldenring-rs.git", rev = "eae96dfec94fd9cf6f9d24813c8d08f72019f243" }
-fromsoftware-shared = { git = "https://github.com/vswarte/eldenring-rs.git", rev = "eae96dfec94fd9cf6f9d24813c8d08f72019f243" }
+shikifsrs-runtime = { git = "https://github.com/KamiyamaShiki0704/ShikiFSRS.git", rev = "930f818431e72209b49d2e37265a1f8150fa5390" }
+shikifsrs-elden-ring = { git = "https://github.com/KamiyamaShiki0704/ShikiFSRS.git", rev = "930f818431e72209b49d2e37265a1f8150fa5390" }
 ilhook = { version = "2.3.0", features = ["x64"] }
 
 [dependencies.windows]
@@ -28,3 +28,7 @@ features = [
 
 [lib]
 crate-type = ["cdylib"]
+
+[workspace]
+resolver = "2"
+members = ["."]

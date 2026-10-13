@@ -153,6 +153,10 @@ impl Drop for DynamicTexture {
     }
 }
 
+#[allow(
+    clippy::too_many_arguments,
+    reason = "Preserve the existing owned movie configuration and diagnostic call surface during SDK migration."
+)]
 pub(crate) fn install(
     log_path: Option<&PathBuf>,
     atlas_rgba_path: Option<PathBuf>,
@@ -211,7 +215,7 @@ pub(crate) fn install(
             let hook = unsafe {
                 hook_closure_retn(
                     addr,
-                    |registers, original| create_shader_resource_view_hook(registers, original),
+                    create_shader_resource_view_hook,
                     CallbackOption::None,
                     HookFlags::empty(),
                 )
@@ -688,12 +692,10 @@ fn maybe_apply_bink_plane_to_title(device: *mut c_void, original: CreateShaderRe
         return;
     }
 
-    let mut desc_storage = source.srv_desc.clone();
+    let mut desc_storage = source.srv_desc;
     let swizzled = settings.bink_plane_source_swizzle_rrr1 && source.format == 61;
-    if swizzled {
-        if let Some(desc) = desc_storage.as_mut() {
-            desc.Shader4ComponentMapping = shader_mapping_rrr1();
-        }
+    if swizzled && let Some(desc) = desc_storage.as_mut() {
+        desc.Shader4ComponentMapping = shader_mapping_rrr1();
     }
     let desc_ptr = desc_storage
         .as_ref()

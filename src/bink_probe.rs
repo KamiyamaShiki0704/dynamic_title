@@ -2,16 +2,15 @@ use std::ffi::{CString, c_void};
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::PathBuf;
-use std::sync::OnceLock;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
-use eldenring::cs::{
-    CSFeManHudState, CSFeManImp, CSMenuManImp, CSNowLoadingHelper, CSTaskGroupIndex, CSTaskImp,
-    WorldChrMan,
-};
-use fromsoftware_shared::FromStatic;
 use ilhook::x64::{CallbackOption, HookFlags, Registers, hook_closure_retn};
+use shikifsrs_elden_ring::{
+    Ww171File, current_title_runtime::CurrentTitleRuntime, title_runtime::TitleRuntimeObservation,
+};
+use shikifsrs_runtime::Result as SdkResult;
 use windows::Win32::Foundation::HMODULE;
 use windows::Win32::System::LibraryLoader::{GetModuleFileNameW, GetModuleHandleA, GetProcAddress};
 use windows::Win32::System::Memory::{
@@ -114,10 +113,6 @@ const NR_STAFFROLL_SLOT15_RVA: usize = 0x78EA60;
 const NR_STAFFROLL_SLOT16_RVA: usize = 0x78DEA0;
 const NR_STAFFROLL_SLOT17_RVA: usize = 0x78FEE0;
 
-const ER_MENU_LOADING_TIMER_OFFSET: usize = 0x734;
-const ER_NOW_LOADING_FLAGS_OFFSET: usize = 0xEC;
-const ER_NOW_LOADING_FLAGS_LEN: usize = 4;
-
 #[derive(Clone, Copy)]
 struct ErRuntimeLayout {
     name: &'static str,
@@ -138,46 +133,6 @@ struct ErRuntimeLayout {
     movie_cleanup_state7_rva: usize,
     movie_imp_init_store_rva: usize,
 }
-
-const ER_WW_262_LAYOUT: ErRuntimeLayout = ErRuntimeLayout {
-    name: "ER 2.6.2.0",
-    movie_open_wrapper_rva: 0x1E83EE0,
-    movie_ins_setup_rva: 0xE20F90,
-    movie_ins_init_play_rva: 0xE212E0,
-    movie_state_step_rva: 0xE20920,
-    movie_state0_rva: 0xE212B0,
-    movie_state1_rva: 0xE21750,
-    movie_resource_ready_rva: 0x1EDC930,
-    movie_state1_ready_callsite_rva: 0xE217D7,
-    movie_tick_rva: 0xE21B70,
-    movie_render_state_rva: 0xE215C0,
-    movie_draw_submit_rva: 0x1AEA9A0,
-    staffroll_last_slot_rva: 0x746E80,
-    staffroll_ctor_rva: 0x8BDD60,
-    cs_movie_imp_global_rva: 0x45878A8,
-    movie_cleanup_state7_rva: 0xE21090,
-    movie_imp_init_store_rva: 0xDEFBBD,
-};
-
-const ER_WW_270_LAYOUT: ErRuntimeLayout = ErRuntimeLayout {
-    name: "ER 2.7.0.0",
-    movie_open_wrapper_rva: 0x1E85CE0,
-    movie_ins_setup_rva: 0xE22D90,
-    movie_ins_init_play_rva: 0xE230E0,
-    movie_state_step_rva: 0xE22720,
-    movie_state0_rva: 0xE230B0,
-    movie_state1_rva: 0xE23550,
-    movie_resource_ready_rva: 0x1EDE730,
-    movie_state1_ready_callsite_rva: 0xE235D7,
-    movie_tick_rva: 0xE23970,
-    movie_render_state_rva: 0xE233C0,
-    movie_draw_submit_rva: 0x1AEC7A0,
-    staffroll_last_slot_rva: 0x747CD0,
-    staffroll_ctor_rva: 0x8BEF00,
-    cs_movie_imp_global_rva: 0x458B928,
-    movie_cleanup_state7_rva: 0xE22E90,
-    movie_imp_init_store_rva: 0xDF19BD,
-};
 
 const ER_WW_271_LAYOUT: ErRuntimeLayout = ErRuntimeLayout {
     name: "ER 2.7.1.0",
@@ -213,6 +168,7 @@ const ER_MOVIE_STATE_LAYOUT_SIGNATURE: &[u8] = &[
     0x48, 0x63, 0x43, 0x44, 0x89, 0x43, 0x40, 0x4C, 0x39, 0x73, 0x58,
 ];
 
+static ER_EXECUTABLE_BYTES: OnceLock<Result<Arc<[u8]>, String>> = OnceLock::new();
 static ER_RUNTIME_LAYOUT: OnceLock<Option<ErRuntimeLayout>> = OnceLock::new();
 static ER_COMPATIBILITY_LOGGED: AtomicUsize = AtomicUsize::new(0);
 
@@ -271,15 +227,30 @@ fn require_er_runtime_layout(context: &str) -> Option<ErRuntimeLayout> {
     layout
 }
 
+fn fixed_er_bytes() -> Result<Arc<[u8]>, String> {
+    ER_EXECUTABLE_BYTES
+        .get_or_init(|| {
+            let path = std::env::current_exe().map_err(|error| error.to_string())?;
+            let bytes: Arc<[u8]> = std::fs::read(path)
+                .map_err(|error| error.to_string())?
+                .into();
+            Ww171File::verify(&bytes).map_err(|error| error.to_string())?;
+            Ok(bytes)
+        })
+        .clone()
+}
+
 fn detect_er_runtime_layout() -> Option<ErRuntimeLayout> {
+    // Fixed file identity precedes loaded-memory reads or native ER title-hook selection.
+    if let Err(error) = fixed_er_bytes() {
+        append_log(&format!("ShikiFSRS executable gate rejected: {error}"));
+        return None;
+    }
     let exe = unsafe { GetModuleHandleA(None) }.ok()?;
     if !main_module_name(exe).contains("eldenring.exe") {
         return None;
     }
-    let base = exe.0 as usize;
-    [ER_WW_271_LAYOUT, ER_WW_270_LAYOUT, ER_WW_262_LAYOUT]
-        .into_iter()
-        .find(|layout| er_runtime_layout_matches(base, *layout))
+    er_runtime_layout_matches(exe.0 as usize, ER_WW_271_LAYOUT).then_some(ER_WW_271_LAYOUT)
 }
 
 fn er_runtime_layout_matches(base: usize, layout: ErRuntimeLayout) -> bool {
@@ -343,7 +314,7 @@ pub(crate) fn install_async(log_path: Option<PathBuf>, replace_rule: Option<Bink
                     match unsafe {
                         hook_closure_retn(
                             addr,
-                            |registers, original| bink_open_hook(registers, original),
+                            bink_open_hook,
                             CallbackOption::None,
                             HookFlags::empty(),
                         )
@@ -393,7 +364,7 @@ pub(crate) fn install_movie_wrapper_probe(log_path: Option<PathBuf>) {
         match unsafe {
             hook_closure_retn(
                 addr,
-                |registers, original| movie_wrapper_hook(registers, original),
+                movie_wrapper_hook,
                 CallbackOption::None,
                 HookFlags::empty(),
             )
@@ -462,7 +433,7 @@ pub(crate) fn install_bink_texture_open_probe(
         match unsafe {
             hook_closure_retn(
                 addr,
-                |registers, original| bink_texture_open_hook(registers, original),
+                bink_texture_open_hook,
                 CallbackOption::None,
                 HookFlags::empty(),
             )
@@ -512,7 +483,7 @@ pub(crate) fn install_movie_ins_probe(log_path: Option<PathBuf>) {
         match unsafe {
             hook_closure_retn(
                 addr,
-                |registers, original| movie_ins_init_hook(registers, original),
+                movie_ins_init_hook,
                 CallbackOption::None,
                 HookFlags::empty(),
             )
@@ -529,6 +500,10 @@ pub(crate) fn install_movie_ins_probe(log_path: Option<PathBuf>) {
     });
 }
 
+#[allow(
+    clippy::too_many_arguments,
+    reason = "Preserve the existing owned movie configuration and diagnostic call surface during SDK migration."
+)]
 pub(crate) fn trigger_er_movie_imp_once_after_delay(
     log_path: Option<PathBuf>,
     path: String,
@@ -552,6 +527,10 @@ pub(crate) fn trigger_er_movie_imp_once_after_delay(
     );
 }
 
+#[allow(
+    clippy::too_many_arguments,
+    reason = "Preserve the existing owned movie configuration and diagnostic call surface during SDK migration."
+)]
 pub(crate) fn trigger_er_movie_imp_once(
     log_path: Option<PathBuf>,
     path: String,
@@ -794,7 +773,7 @@ pub(crate) fn install_movie_step_probe(log_path: Option<PathBuf>) {
         match unsafe {
             hook_closure_retn(
                 addr,
-                |registers, original| movie_step_hook(registers, original),
+                movie_step_hook,
                 CallbackOption::None,
                 HookFlags::empty(),
             )
@@ -817,7 +796,7 @@ pub(crate) fn install_movie_step_probe(log_path: Option<PathBuf>) {
         match unsafe {
             hook_closure_retn(
                 state0_addr,
-                |registers, original| movie_state0_hook(registers, original),
+                movie_state0_hook,
                 CallbackOption::None,
                 HookFlags::empty(),
             )
@@ -839,7 +818,7 @@ pub(crate) fn install_movie_step_probe(log_path: Option<PathBuf>) {
         match unsafe {
             hook_closure_retn(
                 state1_addr,
-                |registers, original| movie_state1_hook(registers, original),
+                movie_state1_hook,
                 CallbackOption::None,
                 HookFlags::empty(),
             )
@@ -861,7 +840,7 @@ pub(crate) fn install_movie_step_probe(log_path: Option<PathBuf>) {
         match unsafe {
             hook_closure_retn(
                 ready_addr,
-                |registers, original| movie_resource_ready_hook(registers, original),
+                movie_resource_ready_hook,
                 CallbackOption::None,
                 HookFlags::empty(),
             )
@@ -904,7 +883,7 @@ pub(crate) fn install_movie_tick_probe(log_path: Option<PathBuf>) {
         match unsafe {
             hook_closure_retn(
                 addr,
-                |registers, original| movie_tick_hook(registers, original),
+                movie_tick_hook,
                 CallbackOption::None,
                 HookFlags::empty(),
             )
@@ -1067,9 +1046,11 @@ pub(crate) fn install_staffroll_ctor_probe(log_path: Option<PathBuf>) {
     });
 }
 
+type StaffrollProbe = (usize, &'static str, fn(*mut Registers, usize) -> usize);
+
 fn install_staffroll_broad_slot_probes(exe: HMODULE) {
     append_log("staffroll screen probe: installing broad NR StaffRollScreen vtable slot probes");
-    let slots: &[(usize, &'static str, fn(*mut Registers, usize) -> usize)] = &[
+    let slots: &[StaffrollProbe] = &[
         (
             NR_STAFFROLL_SLOT00_RVA,
             "staffroll screen probe: NR broad slot00",
@@ -1518,7 +1499,7 @@ fn install_bink_texture_close_probe_from_object(inner: usize) {
     match unsafe {
         hook_closure_retn(
             close_addr,
-            |registers, original| bink_texture_close_hook(registers, original),
+            bink_texture_close_hook,
             CallbackOption::None,
             HookFlags::empty(),
         )
@@ -1870,28 +1851,34 @@ fn start_movie_imp_stop_monitor(movie_ins: usize) {
         return;
     }
     std::thread::spawn(move || {
+        let reader = match bind_title_reader() {
+            Ok(reader) => reader,
+            Err(error) => {
+                append_log(&format!(
+                    "movie imp stop monitor: SDK reader rejected: {error}"
+                ));
+                return;
+            }
+        };
+
         let interval =
             Duration::from_millis(MOVIE_STOP_MONITOR_INTERVAL_MS.load(Ordering::Acquire) as u64);
         let grace =
             Duration::from_millis(MOVIE_STOP_MONITOR_GRACE_MS.load(Ordering::Acquire) as u64);
-        let mut last_snapshot = TitleGateSnapshot::capture();
+        let mut last_snapshot = TitleGateSnapshot::capture(&reader);
         append_log(&format!(
             "movie imp stop monitor: started movie_ins=0x{movie_ins:X} grace={grace:?} {}",
             last_snapshot.summary()
         ));
         std::thread::sleep(grace);
-        let grace_snapshot = TitleGateSnapshot::capture();
+        let grace_snapshot = TitleGateSnapshot::capture(&reader);
         append_log(&format!(
             "movie imp stop monitor: watching after grace {}",
             grace_snapshot.summary()
         ));
 
-        let mut world_player_ticks = 0usize;
-        let world_player_required_ticks = (2000
-            / MOVIE_STOP_MONITOR_INTERVAL_MS
-                .load(Ordering::Acquire)
-                .max(1))
-        .max(1);
+        let mut stop_delay =
+            WorldPlayerStopDelay::new(MOVIE_STOP_MONITOR_INTERVAL_MS.load(Ordering::Acquire));
         for _ in 0..18000 {
             std::thread::sleep(interval);
             if LAST_MOVIE_PARENT.load(Ordering::Acquire) != movie_ins {
@@ -1900,7 +1887,7 @@ fn start_movie_imp_stop_monitor(movie_ins: usize) {
                 ));
                 return;
             }
-            let snapshot = TitleGateSnapshot::capture();
+            let snapshot = TitleGateSnapshot::capture(&reader);
             if snapshot != last_snapshot {
                 append_log(&format!(
                     "movie imp stop monitor: gate changed {}",
@@ -1909,19 +1896,15 @@ fn start_movie_imp_stop_monitor(movie_ins: usize) {
                 last_snapshot = snapshot;
             }
 
-            if snapshot.world_player {
-                world_player_ticks += 1;
-                if world_player_ticks == 1 {
-                    append_log(&format!(
-                        "movie imp stop monitor: world player detected, delaying cleanup ticks_required={world_player_required_ticks}"
-                    ));
-                }
-                if world_player_ticks >= world_player_required_ticks {
-                    request_title_movie_native_finish(movie_ins, "world player stable");
-                    return;
-                }
-            } else {
-                world_player_ticks = 0;
+            if stop_delay.observe(snapshot.world_player) {
+                request_title_movie_native_finish(movie_ins, "world player stable");
+                return;
+            }
+            if stop_delay.consecutive == 1 {
+                append_log(&format!(
+                    "movie imp stop monitor: world player detected, delaying cleanup ticks_required={}",
+                    stop_delay.required
+                ));
             }
         }
 
@@ -1929,150 +1912,121 @@ fn start_movie_imp_stop_monitor(movie_ins: usize) {
     });
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct TitleGateSnapshot {
-    title_flow: bool,
-    title_step: bool,
-    ingame_flow: bool,
-    common_flow: bool,
-    loading: bool,
-    hud_default: bool,
-    world_player: bool,
+fn bind_title_reader() -> Result<CurrentTitleRuntime, String> {
+    let bytes = fixed_er_bytes()?;
+    let exe = unsafe { GetModuleHandleA(None) }.map_err(|error| error.to_string())?;
+    // SAFETY: Experimental original monitor observation/lifetime contract: resident DLL/EXE,
+    // fresh initialized allocations and no teardown/ABA/unknown patch overlap. This reader
+    // performs copied observations, not native calls or scene-classification guarantees.
+    unsafe { CurrentTitleRuntime::bind(bytes, exe.0 as u64, 4096, None) }
+        .map_err(|error| error.to_string())
 }
 
-impl TitleGateSnapshot {
-    fn capture() -> Self {
+thread_local! {
+    static TITLE_PRESENCE_READER: std::cell::RefCell<Option<Result<CurrentTitleRuntime, String>>> = const { std::cell::RefCell::new(None) };
+}
+
+fn world_player_active() -> bool {
+    TITLE_PRESENCE_READER.with(|slot| {
+        let mut slot = slot.borrow_mut();
+        if slot.is_none() {
+            *slot = Some(bind_title_reader());
+        }
+        match slot.as_ref().expect("reader initialized") {
+            Ok(reader) => reader
+                .primary_player_identity(1)
+                .is_ok_and(|identity| identity.is_some()),
+            Err(_) => false,
+        }
+    })
+}
+
+struct WorldPlayerStopDelay {
+    required: usize,
+    consecutive: usize,
+}
+impl WorldPlayerStopDelay {
+    fn new(interval_ms: usize) -> Self {
         Self {
-            title_flow: task_group_active(CSTaskGroupIndex::GameFlowInGame_TitleMenu),
-            title_step: task_group_active(CSTaskGroupIndex::TaskLineIdx_InGame_TitleMenuStep),
-            ingame_flow: task_group_active(CSTaskGroupIndex::GameFlowInGame_InGameMenu),
-            common_flow: task_group_active(CSTaskGroupIndex::GameFlowInGame_CommonMenu),
-            loading: loading_screen_active().unwrap_or(false),
-            hud_default: hud_is_default(),
-            world_player: world_player_active(),
+            required: (2000 / interval_ms.max(1)).max(1),
+            consecutive: 0,
         }
     }
+    fn observe(&mut self, present: bool) -> bool {
+        self.consecutive = if present {
+            self.consecutive.saturating_add(1)
+        } else {
+            0
+        };
+        self.consecutive >= self.required
+    }
+}
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct TitleGateSnapshot {
+    groups: [Option<u8>; 4],
+    frontend_state: Option<i32>,
+    menu_selector: Option<i32>,
+    loading_pulses: Option<[u8; 2]>,
+    world_player: bool,
+    primary_observation_ok: bool,
+    diagnostics_available: bool,
+}
+impl TitleGateSnapshot {
+    fn capture(reader: &CurrentTitleRuntime) -> Self {
+        // The stop policy must remain independent of changing/missing diagnostic components.
+        let primary = reader
+            .primary_player_identity(1)
+            .map(|value| value.is_some());
+        Self::from_observations(primary, reader.snapshot(1))
+    }
+    fn from_observations(
+        primary: SdkResult<bool>,
+        raw: SdkResult<TitleRuntimeObservation>,
+    ) -> Self {
+        let diagnostics_available = raw.is_ok();
+        let primary_observation_ok = primary.is_ok();
+        let raw = raw.ok();
+        Self {
+            groups: raw
+                .as_ref()
+                .map(|raw| {
+                    raw.groups
+                        .map(|group| group.map(|group| group.native_enabled))
+                })
+                .unwrap_or([None; 4]),
+            frontend_state: raw
+                .as_ref()
+                .and_then(|raw| raw.frontend.map(|value| value.native_state)),
+            menu_selector: raw
+                .as_ref()
+                .and_then(|raw| raw.menu.map(|value| value.native_selector)),
+            loading_pulses: raw.as_ref().and_then(|raw| {
+                raw.loading_pulses
+                    .map(|value| [value.current, value.previous])
+            }),
+            world_player: primary.unwrap_or(false),
+            primary_observation_ok,
+            diagnostics_available,
+        }
+    }
     fn summary(&self) -> String {
         format!(
-            "title_flow={} title_step={} ingame_flow={} common_flow={} loading={} hud_default={} world_player={}",
-            self.title_flow,
-            self.title_step,
-            self.ingame_flow,
-            self.common_flow,
-            self.loading,
-            self.hud_default,
-            self.world_player
+            "group_enable_bytes={:?} frontend_raw={:?} menu_selector={:?} loading_pulses={:?} world_player={} primary_observation_ok={} diagnostics_available={}",
+            self.groups,
+            self.frontend_state,
+            self.menu_selector,
+            self.loading_pulses,
+            self.world_player,
+            self.primary_observation_ok,
+            self.diagnostics_available
         )
     }
 }
 
-fn loading_screen_active() -> Option<bool> {
-    let menu_loading = unsafe { CSMenuManImp::instance() }
-        .ok()
-        .and_then(|menu_man| {
-            read_f32_field(
-                menu_man as *const CSMenuManImp as usize,
-                ER_MENU_LOADING_TIMER_OFFSET,
-            )
-        })
-        .map(|timer| timer.is_finite() && timer > 0.25);
-    let now_loading = unsafe { CSNowLoadingHelper::instance() }
-        .ok()
-        .and_then(|helper| {
-            any_nonzero_bytes(
-                helper as *const CSNowLoadingHelper as usize,
-                ER_NOW_LOADING_FLAGS_OFFSET,
-                ER_NOW_LOADING_FLAGS_LEN,
-            )
-        });
-
-    match (menu_loading, now_loading) {
-        (Some(a), Some(b)) => Some(a || b),
-        (Some(a), None) => Some(a),
-        (None, Some(b)) => Some(b),
-        (None, None) => None,
-    }
-}
-
-fn read_f32_field(base: usize, offset: usize) -> Option<f32> {
-    let address = base.checked_add(offset)?;
-    if !is_readable_memory(address, std::mem::size_of::<f32>()) {
-        return None;
-    }
-    Some(unsafe { std::ptr::read_unaligned(address as *const f32) })
-}
-
-fn any_nonzero_bytes(base: usize, offset: usize, len: usize) -> Option<bool> {
-    let address = base.checked_add(offset)?;
-    if !is_readable_memory(address, len) {
-        return None;
-    }
-    let values = unsafe { std::slice::from_raw_parts(address as *const u8, len) };
-    Some(values.iter().any(|value| *value != 0))
-}
-
 #[cfg(test)]
-mod loading_state_tests {
-    use super::*;
-
-    #[test]
-    fn pinned_types_cover_loading_state_offsets() {
-        assert!(
-            std::mem::size_of::<CSMenuManImp>()
-                >= ER_MENU_LOADING_TIMER_OFFSET + std::mem::size_of::<f32>()
-        );
-        assert!(
-            std::mem::size_of::<CSNowLoadingHelper>()
-                >= ER_NOW_LOADING_FLAGS_OFFSET + ER_NOW_LOADING_FLAGS_LEN
-        );
-    }
-
-    #[test]
-    fn guarded_loading_state_reads_local_memory() {
-        let timer = 0.5_f32;
-        let timer_base = &timer as *const f32 as usize;
-        assert_eq!(read_f32_field(timer_base, 0), Some(timer));
-
-        let inactive = [0_u8; ER_NOW_LOADING_FLAGS_LEN];
-        let active = [0_u8, 1, 0, 0];
-        assert_eq!(
-            any_nonzero_bytes(inactive.as_ptr() as usize, 0, inactive.len()),
-            Some(false)
-        );
-        assert_eq!(
-            any_nonzero_bytes(active.as_ptr() as usize, 0, active.len()),
-            Some(true)
-        );
-        assert_eq!(read_f32_field(usize::MAX, 1), None);
-    }
-}
-
-fn hud_is_default() -> bool {
-    unsafe { CSFeManImp::instance() }
-        .map(|fe_man| fe_man.hud_state == CSFeManHudState::Default)
-        .unwrap_or(false)
-}
-
-fn world_player_active() -> bool {
-    unsafe { WorldChrMan::instance() }
-        .map(|world_chr_man| world_chr_man.main_player.is_some())
-        .unwrap_or(false)
-}
-
-fn task_group_active(index: CSTaskGroupIndex) -> bool {
-    let Ok(task) = (unsafe { CSTaskImp::instance() }) else {
-        return false;
-    };
-    let wanted = index as u32;
-    task.inner
-        .task_base
-        .task_groups
-        .iter()
-        .find(|entry| entry.index == wanted)
-        .map(|entry| entry.active)
-        .unwrap_or(false)
-}
+#[path = "title_policy_tests.rs"]
+mod title_policy_tests;
 
 type MovieOpenWrapperFn = unsafe extern "system" fn(usize, usize, usize, usize) -> usize;
 
@@ -2595,6 +2549,10 @@ fn log_movie_step(
     ));
 }
 
+#[allow(
+    clippy::too_many_arguments,
+    reason = "Preserve the existing owned movie configuration and diagnostic call surface during SDK migration."
+)]
 fn log_movie_state_fields(
     label: &str,
     count: usize,

@@ -310,17 +310,17 @@ impl Config {
                         }
                     }
                     "hijack_resource_width" | "hijack_target_width" => {
-                        if let Ok(width) = value.parse::<u32>() {
-                            if width > 0 {
-                                config.hijack_resource_width = width;
-                            }
+                        if let Ok(width) = value.parse::<u32>()
+                            && width > 0
+                        {
+                            config.hijack_resource_width = width;
                         }
                     }
                     "hijack_resource_height" | "hijack_target_height" => {
-                        if let Ok(height) = value.parse::<u32>() {
-                            if height > 0 {
-                                config.hijack_resource_height = height;
-                            }
+                        if let Ok(height) = value.parse::<u32>()
+                            && height > 0
+                        {
+                            config.hijack_resource_height = height;
                         }
                     }
                     "hijack_require_bc7" => {
@@ -396,10 +396,10 @@ impl Config {
                         }
                     }
                     "movie_imp_volume" => {
-                        if let Ok(volume) = value.parse::<f32>() {
-                            if volume.is_finite() {
-                                config.movie_imp_volume = volume.clamp(0.0, 1.0);
-                            }
+                        if let Ok(volume) = value.parse::<f32>()
+                            && volume.is_finite()
+                        {
+                            config.movie_imp_volume = volume.clamp(0.0, 1.0);
                         }
                     }
                     "movie_imp_setup_flag" => {
@@ -464,17 +464,17 @@ impl Config {
                         }
                     }
                     "bink_plane_source_width" => {
-                        if let Ok(width) = value.parse::<u32>() {
-                            if width > 0 {
-                                config.bink_plane_source_width = width;
-                            }
+                        if let Ok(width) = value.parse::<u32>()
+                            && width > 0
+                        {
+                            config.bink_plane_source_width = width;
                         }
                     }
                     "bink_plane_source_height" => {
-                        if let Ok(height) = value.parse::<u32>() {
-                            if height > 0 {
-                                config.bink_plane_source_height = height;
-                            }
+                        if let Ok(height) = value.parse::<u32>()
+                            && height > 0
+                        {
+                            config.bink_plane_source_height = height;
                         }
                     }
                     "bink_plane_source_format" => {
@@ -519,15 +519,15 @@ fn append_log_path(path: Option<&PathBuf>, message: &str) {
 
 fn config_paths(hmodule: HINSTANCE) -> Vec<PathBuf> {
     let mut paths = Vec::new();
-    if let Some(dll_path) = module_path(hmodule) {
-        if let Some(dir) = dll_path.parent() {
-            paths.push(dir.join("dynamic-title-bg.ini"));
-        }
+    if let Some(dll_path) = module_path(hmodule)
+        && let Some(dir) = dll_path.parent()
+    {
+        paths.push(dir.join("dynamic-title-bg.ini"));
     }
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(dir) = exe.parent() {
-            paths.push(dir.join("dynamic-title-bg.ini"));
-        }
+    if let Ok(exe) = std::env::current_exe()
+        && let Some(dir) = exe.parent()
+    {
+        paths.push(dir.join("dynamic-title-bg.ini"));
     }
     if let Ok(dir) = std::env::current_dir() {
         paths.push(dir.join("dynamic-title-bg.ini"));
